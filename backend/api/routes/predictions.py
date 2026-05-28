@@ -338,7 +338,7 @@ async def get_training_history(symbol: str, limit: int = 10):
 
 @router.get("/models/best-run/{symbol}")
 async def get_best_training_run(symbol: str):
-    """Get the best training run for a symbol (lowest avg MAPE)."""
+    """Get the best training run for a symbol (lowest composite score)."""
     from config.settings import settings
     from data.storage import DatabaseManager
     db = DatabaseManager(settings.db_path)
@@ -348,7 +348,7 @@ async def get_best_training_run(symbol: str):
     return {
         "symbol": symbol,
         "best_run": best,
-        "message": f"Best run (id={best['id']}): avg MAPE = {((best.get('lstm_mape') or 0) + (best.get('xgb_mape') or 0)) / 2.0:.2f}%",
+        "message": f"Best run (id={best['id']}): composite_score = {best.get('composite_score', 0):.2f}",
     }
 
 
