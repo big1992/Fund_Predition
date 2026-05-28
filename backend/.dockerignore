@@ -1,0 +1,27 @@
+# VCS and tooling
+.git
+.gitignore
+.pytest_cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local runtime artifacts
+database/
+saved_models/
+logs/
+tmp/
+temp/
+
+# Local env and notebooks
+.env
+.venv/
+venv/
+env/
+.ipynb_checkpoints/
+
+# Test and docs artifacts not needed in runtime image
+tests/
+*.md
+

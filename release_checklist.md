@@ -39,6 +39,8 @@
 - [ ] `docker compose up --build` runs both frontend and backend successfully.
 - [ ] Frontend reachable at `http://localhost:5173`.
 - [ ] Backend docs reachable at `http://localhost:8000/docs`.
+- [ ] Docker build contexts are scoped and ignored properly (`backend/.dockerignore`, `frontend/.dockerignore`).
+- [ ] Large runtime artifacts (for example `backend/saved_models`, `backend/database`) are excluded from image build context and mounted via volumes only.
 
 ## Go/No-Go
 - [ ] All Sprint issues for release are moved to `Done`.
