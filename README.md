@@ -139,3 +139,9 @@ pwsh ./scripts/smoke-compose.ps1
 
 Rollback reference:
 - `rollback_notes.md`
+
+## Team Workflow Rule
+
+- Any bug, regression, or requested fix must be logged in Linear before or alongside implementation.
+- If work starts immediately, create/update the Linear issue in the same session and link it to the active Sprint.
+- A fix is not considered complete until the related Linear issue is updated with status and validation notes.

@@ -44,5 +44,6 @@
 
 ## Go/No-Go
 - [ ] All Sprint issues for release are moved to `Done`.
+- [ ] Every bug/fix handled in this release is tracked in Linear and linked to the Sprint.
 - [ ] Known blockers documented and accepted.
 - [ ] Release owner approved go-live.
