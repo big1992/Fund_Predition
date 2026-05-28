@@ -1,5 +1,20 @@
 # Production Readiness Checklist
 
+## Release Gates (Required)
+- [ ] Backend tests pass: `python -m pytest backend/tests -q`
+- [ ] Frontend production build passes: `npm run build` (from `frontend`)
+- [ ] Compose smoke passes: `pwsh ./scripts/smoke-compose.ps1`
+- [ ] CI workflow green on `main` before tag/release
+
+## Verification Log Template
+- Date:
+- Commit:
+- Backend tests:
+- Frontend build:
+- Compose smoke:
+- Reviewer/Owner:
+- Result: `GO` / `NO-GO`
+
 ## Security
 - [ ] `OPENAI_API_KEY` and other secrets are provided via environment variables (not hardcoded).
 - [ ] CORS origins are restricted to trusted frontend domains.

@@ -10,7 +10,7 @@ import random
 import json
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 from typing import Optional
 
@@ -58,7 +58,7 @@ class ModelTrainer:
         payload = {
             "symbol": symbol,
             "model_name": model_name,
-            "trained_at_utc": datetime.utcnow().isoformat() + "Z",
+            "trained_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "seed": self.seed,
             "row_count": int(len(df)),
             "date_start": str(df.index.min()) if len(df) > 0 else None,
