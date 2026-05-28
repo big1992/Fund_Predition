@@ -7,12 +7,12 @@ $ErrorActionPreference = "Stop"
 
 Write-Host "Running compose smoke checks..."
 
-$health = Invoke-RestMethod -Uri "$BackendUrl/api/health" -Method Get
+$health = Invoke-RestMethod -Uri "$BackendUrl/api/health" -Method Get -UseBasicParsing
 if ($health.status -ne "healthy") {
     throw "Backend health check failed: status=$($health.status)"
 }
 
-$front = Invoke-WebRequest -Uri $FrontendUrl -Method Get
+$front = Invoke-WebRequest -Uri $FrontendUrl -Method Get -UseBasicParsing
 if ($front.StatusCode -ne 200) {
     throw "Frontend not reachable: status=$($front.StatusCode)"
 }
