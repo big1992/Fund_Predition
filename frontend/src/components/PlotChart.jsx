@@ -1,13 +1,33 @@
 import { useEffect, useRef } from 'react';
 
 let plotlyModulePromise;
+const PLOTLY_CDN_SRC = 'https://cdn.jsdelivr.net/npm/plotly.js-dist-min@3.4.0/plotly.min.js';
 
 async function loadPlotly() {
     if (!plotlyModulePromise) {
-        plotlyModulePromise = import('plotly.js-dist-min');
+        plotlyModulePromise = new Promise((resolve, reject) => {
+            if (window.Plotly) {
+                resolve(window.Plotly);
+                return;
+            }
+
+            const existingScript = document.querySelector('script[data-plotly-cdn="true"]');
+            if (existingScript) {
+                existingScript.addEventListener('load', () => resolve(window.Plotly), { once: true });
+                existingScript.addEventListener('error', () => reject(new Error('Plotly CDN load failed')), { once: true });
+                return;
+            }
+
+            const script = document.createElement('script');
+            script.src = PLOTLY_CDN_SRC;
+            script.async = true;
+            script.dataset.plotlyCdn = 'true';
+            script.onload = () => resolve(window.Plotly);
+            script.onerror = () => reject(new Error('Plotly CDN load failed'));
+            document.head.appendChild(script);
+        });
     }
-    const mod = await plotlyModulePromise;
-    return mod.default ?? mod;
+    return plotlyModulePromise;
 }
 
 /**
