@@ -437,7 +437,13 @@ class ModelTrainer:
                      symbol, len(fold_ends), len(fold_ends))
         return results
 
-    def predict(self, df: pd.DataFrame, symbol: str, model_type: str = "ensemble") -> dict:
+    def predict(
+        self,
+        df: pd.DataFrame,
+        symbol: str,
+        model_type: str = "ensemble",
+        days: Optional[int] = None,
+    ) -> dict:
         """
         Generate predictions for a symbol.
         Returns predictions, signal, and confidence.
@@ -484,7 +490,7 @@ class ModelTrainer:
             lstm_preds = None
             xgb_preds = None
             ag_preds = None
-            n_days = LSTM_PARAMS["prediction_days"]
+            n_days = int(days) if days is not None else int(LSTM_PARAMS["prediction_days"])
 
             if model_type in ("lstm", "ensemble") and self.lstm_model and self.lstm_model.model:
                 lstm_preds = self._predict_lstm(df, n_days, sentiment_df=sentiment_df)

@@ -35,7 +35,7 @@ async def get_prediction(
         raise HTTPException(404, f"No data for {symbol}. Run /api/stocks/collect first.")
 
     # Generate predictions
-    result = trainer.predict(df, symbol, model_type=model)
+    result = trainer.predict(df, symbol, model_type=model, days=days)
 
     predictions = [
         PredictionPoint(
