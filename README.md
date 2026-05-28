@@ -124,3 +124,18 @@ Create `.env` from template:
 ```bash
 copy backend\.env.example backend\.env
 ```
+
+## CI Status
+
+[![CI](https://github.com/big1992/Fund_Predition/actions/workflows/ci.yml/badge.svg)](https://github.com/big1992/Fund_Predition/actions/workflows/ci.yml)
+
+## Smoke Test (Compose)
+
+After `docker compose up --build`, run:
+
+```bash
+pwsh ./scripts/smoke-compose.ps1
+```
+
+Rollback reference:
+- `rollback_notes.md`

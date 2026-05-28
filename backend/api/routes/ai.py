@@ -3,14 +3,17 @@ AI-powered explanation routes.
 """
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional
 from api.main import app_state
 
 router = APIRouter()
 
+class AIBaseModel(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
 
-class PredictionExplainRequest(BaseModel):
+
+class PredictionExplainRequest(AIBaseModel):
     symbol: str
     current_price: float
     predictions: list[dict]
@@ -20,12 +23,12 @@ class PredictionExplainRequest(BaseModel):
     indicators: Optional[dict] = None
 
 
-class PerformanceExplainRequest(BaseModel):
+class PerformanceExplainRequest(AIBaseModel):
     models: list[dict]
     backtest: Optional[dict] = None
 
 
-class ExplainResponse(BaseModel):
+class ExplainResponse(AIBaseModel):
     explanation: str
     available: bool = True
 
@@ -69,14 +72,14 @@ async def explain_performance(request: PerformanceExplainRequest):
     return ExplainResponse(explanation=explanation)
 
 
-class TrainingExplainRequest(BaseModel):
+class TrainingExplainRequest(AIBaseModel):
     symbol: str
     metrics: dict
     current_params: dict
     previous_metrics: Optional[dict] = None  # before/after comparison
 
 
-class TrainingExplainResponse(BaseModel):
+class TrainingExplainResponse(AIBaseModel):
     explanation: str
     recommended_params: dict = {}
     satisfaction_score: int = 5

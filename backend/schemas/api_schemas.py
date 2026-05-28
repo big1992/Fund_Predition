@@ -3,21 +3,24 @@ Pydantic schemas for API request/response validation.
 """
 
 import re
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from datetime import date, datetime
 from typing import Optional, Literal
+
+class APIBaseModel(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
 
 
 # ============== Stock Schemas ==============
 
-class StockInfo(BaseModel):
+class StockInfo(APIBaseModel):
     symbol: str
     name: str
     sector: str
     market: Optional[str] = None
 
 
-class StockPrice(BaseModel):
+class StockPrice(APIBaseModel):
     date: date
     open: float
     high: float
@@ -27,13 +30,13 @@ class StockPrice(BaseModel):
     volume: int
 
 
-class StockPriceResponse(BaseModel):
+class StockPriceResponse(APIBaseModel):
     symbol: str
     prices: list[StockPrice]
     count: int
 
 
-class IndicatorData(BaseModel):
+class IndicatorData(APIBaseModel):
     date: date
     close: float
     sma_20: Optional[float] = None
@@ -57,18 +60,18 @@ class IndicatorData(BaseModel):
     volume_sma_20: Optional[float] = None
 
 
-class IndicatorResponse(BaseModel):
+class IndicatorResponse(APIBaseModel):
     symbol: str
     indicators: list[IndicatorData]
     count: int
 
 
-class CollectRequest(BaseModel):
+class CollectRequest(APIBaseModel):
     symbols: list[str] = Field(default=[], description="Stock symbols to collect. Empty = all")
     period: Literal["1y", "2y", "5y", "max"] = Field(default="5y", description="Data period: 1y, 2y, 5y, max")
 
 
-class CollectResponse(BaseModel):
+class CollectResponse(APIBaseModel):
     status: str
     symbols_collected: int
     records_stored: int
@@ -77,13 +80,13 @@ class CollectResponse(BaseModel):
 
 # ============== Fund Schemas ==============
 
-class FundHolding(BaseModel):
+class FundHolding(APIBaseModel):
     symbol: str
     name: str
     weight: float
 
 
-class FundInfo(BaseModel):
+class FundInfo(APIBaseModel):
     fund_name: str
     display_name: str
     style: str
@@ -92,13 +95,13 @@ class FundInfo(BaseModel):
     benchmark: str
 
 
-class FundNAV(BaseModel):
+class FundNAV(APIBaseModel):
     date: date
     nav: float
     daily_return: Optional[float] = None
 
 
-class FundNAVResponse(BaseModel):
+class FundNAVResponse(APIBaseModel):
     fund_name: str
     nav_history: list[FundNAV]
     current_nav: Optional[float] = None
@@ -108,13 +111,13 @@ class FundNAVResponse(BaseModel):
 
 # ============== Prediction Schemas ==============
 
-class PredictionPoint(BaseModel):
+class PredictionPoint(APIBaseModel):
     date: date
     predicted_price: float
     confidence: float  # 0-100
 
 
-class PredictionResponse(BaseModel):
+class PredictionResponse(APIBaseModel):
     symbol: str
     model: str
     current_price: float
@@ -124,7 +127,7 @@ class PredictionResponse(BaseModel):
     confidence: float
 
 
-class TrainRequest(BaseModel):
+class TrainRequest(APIBaseModel):
     symbols: list[str] = Field(default=[], description="Symbols to train. Empty = all")
     model_type: Literal["lstm", "xgboost", "autogluon", "all"] = "all"
     walk_forward: bool = Field(default=False, description="Use walk-forward validation")
@@ -142,7 +145,7 @@ class TrainRequest(BaseModel):
         return normalized
 
 
-class TrainResponse(BaseModel):
+class TrainResponse(APIBaseModel):
     status: str
     models_trained: list[str]
     metrics: dict
@@ -151,19 +154,19 @@ class TrainResponse(BaseModel):
 
 # ============== Portfolio Schemas ==============
 
-class PortfolioRequest(BaseModel):
+class PortfolioRequest(APIBaseModel):
     symbols: list[str] = Field(min_length=2, description="At least 2 symbols")
     method: Literal["max_sharpe", "min_volatility", "risk_parity"] = "max_sharpe"
     risk_level: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
-class FrontierPoint(BaseModel):
+class FrontierPoint(APIBaseModel):
     volatility: float
     expected_return: float
     sharpe_ratio: float
 
 
-class PortfolioResponse(BaseModel):
+class PortfolioResponse(APIBaseModel):
     method: str
     weights: dict[str, float]
     expected_return: float
@@ -174,7 +177,7 @@ class PortfolioResponse(BaseModel):
 
 # ============== Backtest Schemas ==============
 
-class BacktestRequest(BaseModel):
+class BacktestRequest(APIBaseModel):
     symbol: str
     model_type: Literal["lstm", "xgboost", "ensemble"] = "ensemble"
     initial_capital: float = 1_000_000
@@ -203,7 +206,7 @@ class BacktestRequest(BaseModel):
         return self
 
 
-class Trade(BaseModel):
+class Trade(APIBaseModel):
     date: date
     action: Literal["BUY", "SELL"]
     price: float
@@ -211,7 +214,7 @@ class Trade(BaseModel):
     value: float
 
 
-class BacktestResponse(BaseModel):
+class BacktestResponse(APIBaseModel):
     symbol: str
     model: str
     initial_capital: float
@@ -229,7 +232,7 @@ class BacktestResponse(BaseModel):
 
 # ============== Model Performance Schemas ==============
 
-class ModelMetrics(BaseModel):
+class ModelMetrics(APIBaseModel):
     model_name: str
     symbol: str
     rmse: float
@@ -239,16 +242,16 @@ class ModelMetrics(BaseModel):
     r_squared: float
 
 
-class FeatureImportance(BaseModel):
+class FeatureImportance(APIBaseModel):
     feature: str
     importance: float
 
 
-class ModelPerformanceResponse(BaseModel):
+class ModelPerformanceResponse(APIBaseModel):
     models: list[ModelMetrics]
 
 
-class FeatureImportanceResponse(BaseModel):
+class FeatureImportanceResponse(APIBaseModel):
     symbol: str
     model: str
     features: list[FeatureImportance]
@@ -256,7 +259,7 @@ class FeatureImportanceResponse(BaseModel):
 
 # ============== System Schemas ==============
 
-class HealthResponse(BaseModel):
+class HealthResponse(APIBaseModel):
     status: str
     version: str
     uptime_seconds: float
@@ -264,12 +267,12 @@ class HealthResponse(BaseModel):
     data_available: bool
 
 
-class ErrorDetail(BaseModel):
+class ErrorDetail(APIBaseModel):
     field: Optional[str] = None
     message: str
 
 
-class ErrorResponse(BaseModel):
+class ErrorResponse(APIBaseModel):
     error_code: str
     message: str
     details: list[ErrorDetail] = []

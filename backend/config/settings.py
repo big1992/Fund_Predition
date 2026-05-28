@@ -3,7 +3,7 @@ Global configuration for the Fund Prediction System.
 Uses Pydantic BaseSettings for environment variable support.
 """
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 from pathlib import Path
 from typing import Optional
@@ -15,6 +15,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 class Settings(BaseSettings):
     """Application settings."""
+    model_config = SettingsConfigDict(
+        env_prefix="",
+        env_file=".env",
+        protected_namespaces=("settings_",),
+    )
 
     # App
     app_name: str = "Fund Prediction System"
@@ -37,10 +42,6 @@ class Settings(BaseSettings):
 
     # NewsAPI
     newsapi_key: Optional[str] = None
-
-    class Config:
-        env_prefix = ""
-        env_file = ".env"
 
 
 # ---------- Stock Universe ----------
