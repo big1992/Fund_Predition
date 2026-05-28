@@ -27,6 +27,7 @@ export default function Prediction() {
     const [autoTuneLogs, setAutoTuneLogs] = useState([]);
     const [autoTuneRound, setAutoTuneRound] = useState(0);
     const [autoTuneHistory, setAutoTuneHistory] = useState([]);  // for chart
+    const [autoTuneHistoryApi, setAutoTuneHistoryApi] = useState([]);
     const autoTuneCancelRef = useRef(false);
     const MAX_AUTO_TUNE_ROUNDS = 3;
 
@@ -167,6 +168,7 @@ export default function Prediction() {
         setAiRecommendedParams(null);
         setShowTrainResult(false);
         setAutoTuneHistory([]);
+        setAutoTuneHistoryApi([]);
         autoTuneCancelRef.current = false;
 
         const addLog = (msg) => setAutoTuneLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), msg }]);
@@ -309,6 +311,30 @@ export default function Prediction() {
         }
 
         addLog(`🏁 Auto-Tune เสร็จสิ้น — Best Score: ${bestScore}/10`);
+        try {
+            const historyRes = await getTrainingHistory(selected, 20);
+            const historyRows = historyRes?.data?.history || [];
+            const normalized = historyRows
+                .map((row, idx) => {
+                    const avgMape = row?.lstm_mape != null || row?.xgb_mape != null
+                        ? (((row?.lstm_mape ?? row?.xgb_mape ?? 0) + (row?.xgb_mape ?? row?.lstm_mape ?? 0)) / 2)
+                        : null;
+                    const avgDir = row?.lstm_directional_accuracy != null || row?.xgb_directional_accuracy != null
+                        ? (((row?.lstm_directional_accuracy ?? row?.xgb_directional_accuracy ?? 0) + (row?.xgb_directional_accuracy ?? row?.lstm_directional_accuracy ?? 0)) / 2)
+                        : null;
+                    return {
+                        runLabel: `Run ${historyRows.length - idx}`,
+                        createdAt: row?.created_at || '',
+                        avgMape,
+                        avgDir,
+                    };
+                })
+                .reverse();
+            setAutoTuneHistoryApi(normalized);
+            if (normalized.length > 0) addLog(`📈 โหลดประวัติการฝึกจากระบบ ${normalized.length} รายการ`);
+        } catch (err) {
+            addLog(`⚠️ โหลดประวัติการฝึกไม่สำเร็จ: ${err?.message || 'Unknown error'}`);
+        }
         setAutoTuning(false);
     };
 
@@ -397,7 +423,7 @@ export default function Prediction() {
                             </div>
                         ))}
                     </div>
-                    {/* History Chart */}
+                    {/* History Chart (local auto-tune rounds) */}
                     {autoTuneHistory.length > 1 && (
                         <div style={{ padding: '12px 0', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
                             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--text-primary)' }}>📈 Tuning Trend</div>
@@ -461,6 +487,53 @@ export default function Prediction() {
                                     </div>
                                 </div>
                             </div>
+                        </div>
+                    )}
+
+                    {/* History Chart (API-backed) */}
+                    {autoTuneHistoryApi.length > 0 && (
+                        <div style={{ padding: '12px 0', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--text-primary)' }}>
+                                📊 Training History (from API)
+                            </div>
+                            <PlotChart
+                                data={[
+                                    {
+                                        x: autoTuneHistoryApi.map(h => h.runLabel),
+                                        y: autoTuneHistoryApi.map(h => h.avgMape),
+                                        type: 'scatter',
+                                        mode: 'lines+markers',
+                                        name: 'Avg MAPE',
+                                        line: { color: '#ef4444', width: 2 },
+                                        marker: { size: 6 },
+                                    },
+                                    {
+                                        x: autoTuneHistoryApi.map(h => h.runLabel),
+                                        y: autoTuneHistoryApi.map(h => h.avgDir),
+                                        type: 'scatter',
+                                        mode: 'lines+markers',
+                                        name: 'Avg Direction Acc',
+                                        yaxis: 'y2',
+                                        line: { color: '#06b6d4', width: 2 },
+                                        marker: { size: 6 },
+                                    },
+                                ]}
+                                layout={{
+                                    height: 280,
+                                    margin: { t: 10, b: 40, l: 55, r: 55 },
+                                    xaxis: { title: 'Run', gridcolor: '#1e293b' },
+                                    yaxis: { title: 'MAPE (%)', gridcolor: '#1e293b' },
+                                    yaxis2: {
+                                        title: 'Direction Accuracy (%)',
+                                        overlaying: 'y',
+                                        side: 'right',
+                                        range: [0, 100],
+                                    },
+                                    legend: { orientation: 'h', y: 1.15 },
+                                    showlegend: true,
+                                }}
+                                style={{ width: '100%' }}
+                            />
                         </div>
                     )}
                 </div>
