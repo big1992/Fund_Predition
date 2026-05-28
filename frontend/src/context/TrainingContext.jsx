@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { getActiveTasks, getTrainStatus, dismissTask } from '../api/client';
+import { getActiveTasks, dismissTask, cancelTrainTask } from '../api/client';
 
 const TrainingContext = createContext();
 
@@ -19,7 +19,7 @@ export function TrainingProvider({ children }) {
 
             // Detect newly completed tasks
             const justCompleted = all.filter(
-                t => (t.status === 'completed' || t.status === 'failed')
+                t => (t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled')
                     && !completedTasks.find(c => c.task_id === t.task_id)
             );
             if (justCompleted.length > 0) {
@@ -58,10 +58,17 @@ export function TrainingProvider({ children }) {
         setTasks(prev => prev.filter(t => t.task_id !== taskId));
     }, []);
 
-    const activeTasks = tasks.filter(t => t.status === 'running' || t.status === 'pending');
+    const handleCancel = useCallback(async (taskId) => {
+        try {
+            await cancelTrainTask(taskId);
+            setTasks(prev => prev.map(t => t.task_id === taskId ? { ...t, status: 'cancelling', message: 'Cancellation requested...' } : t));
+        } catch { }
+    }, []);
+
+    const activeTasks = tasks.filter(t => t.status === 'running' || t.status === 'pending' || t.status === 'cancelling');
 
     return (
-        <TrainingContext.Provider value={{ tasks, activeTasks, completedTasks, startPolling, handleDismiss }}>
+        <TrainingContext.Provider value={{ tasks, activeTasks, completedTasks, startPolling, handleDismiss, handleCancel }}>
             {children}
         </TrainingContext.Provider>
     );

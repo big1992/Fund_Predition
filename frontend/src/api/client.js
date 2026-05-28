@@ -64,6 +64,7 @@ export const getDailySentiment = (symbol, days = 30) => api.get(`/news/${symbol}
 export const trainModelsAsync = (data) => api.post('/predictions/train/async', data);
 export const getTrainStatus = (taskId) => api.get(`/predictions/train/status/${taskId}`);
 export const getActiveTasks = () => api.get('/predictions/train/active');
+export const cancelTrainTask = (taskId) => api.post(`/predictions/train/cancel/${taskId}`);
 export const dismissTask = (taskId) => api.delete(`/predictions/train/dismiss/${taskId}`);
 
 // ===== System APIs =====
