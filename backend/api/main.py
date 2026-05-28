@@ -25,8 +25,10 @@ except Exception as _tf_err:
     warnings.warn(f"TensorFlow failed to initialise: {_tf_err}")
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 
 # Load .env
 load_dotenv()
@@ -39,6 +41,7 @@ from data.storage import DatabaseManager
 from models.trainer import ModelTrainer
 from models.scheduler import RetrainScheduler
 from ai.explainer import AIExplainer
+from schemas.api_schemas import ErrorResponse, ErrorDetail
 
 # Configure logging
 logging.basicConfig(
@@ -110,6 +113,44 @@ app = FastAPI(
     description="ระบบวิเคราะห์และพยากรณ์กองทุนรวมหุ้นไทย",
     lifespan=lifespan,
 )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(_: Request, exc: HTTPException):
+    code = f"HTTP_{exc.status_code}"
+    payload = ErrorResponse(
+        error_code=code,
+        message=str(exc.detail),
+        details=[],
+    )
+    return JSONResponse(status_code=exc.status_code, content=payload.model_dump())
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_exception_handler(_: Request, exc: RequestValidationError):
+    details = []
+    for err in exc.errors():
+        loc = err.get("loc", [])
+        field = ".".join(str(x) for x in loc[1:]) if len(loc) > 1 else None
+        details.append(ErrorDetail(field=field, message=err.get("msg", "Invalid input")))
+
+    payload = ErrorResponse(
+        error_code="VALIDATION_ERROR",
+        message="Request validation failed",
+        details=details,
+    )
+    return JSONResponse(status_code=422, content=payload.model_dump())
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(_: Request, exc: Exception):
+    logger.exception("Unhandled server error: %s", exc)
+    payload = ErrorResponse(
+        error_code="INTERNAL_SERVER_ERROR",
+        message="Unexpected server error",
+        details=[],
+    )
+    return JSONResponse(status_code=500, content=payload.model_dump())
 
 # CORS
 app.add_middleware(

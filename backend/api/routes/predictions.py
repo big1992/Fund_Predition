@@ -20,8 +20,8 @@ router = APIRouter()
 @router.get("/{symbol}", response_model=PredictionResponse)
 async def get_prediction(
     symbol: str,
-    model: str = Query("ensemble", description="Model: lstm, xgboost, autogluon, ensemble"),
-    days: int = Query(5, description="Prediction days ahead"),
+    model: str = Query("ensemble", pattern="^(lstm|xgboost|autogluon|ensemble)$", description="Model: lstm, xgboost, autogluon, ensemble"),
+    days: int = Query(5, ge=1, le=30, description="Prediction days ahead"),
 ):
     """Get price predictions for a stock."""
     db = app_state["db"]

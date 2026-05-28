@@ -2,7 +2,8 @@
 Pydantic schemas for API request/response validation.
 """
 
-from pydantic import BaseModel, Field
+import re
+from pydantic import BaseModel, Field, field_validator, model_validator
 from datetime import date, datetime
 from typing import Optional, Literal
 
@@ -64,7 +65,7 @@ class IndicatorResponse(BaseModel):
 
 class CollectRequest(BaseModel):
     symbols: list[str] = Field(default=[], description="Stock symbols to collect. Empty = all")
-    period: str = Field(default="5y", description="Data period: 1y, 2y, 5y, max")
+    period: Literal["1y", "2y", "5y", "max"] = Field(default="5y", description="Data period: 1y, 2y, 5y, max")
 
 
 class CollectResponse(BaseModel):
@@ -128,6 +129,18 @@ class TrainRequest(BaseModel):
     model_type: Literal["lstm", "xgboost", "autogluon", "all"] = "all"
     walk_forward: bool = Field(default=False, description="Use walk-forward validation")
 
+    @field_validator("symbols")
+    @classmethod
+    def validate_symbols(cls, values: list[str]) -> list[str]:
+        symbol_re = re.compile(r"^[A-Z0-9][A-Z0-9.\-]{0,14}$")
+        normalized = []
+        for symbol in values:
+            s = symbol.strip().upper()
+            if not symbol_re.match(s):
+                raise ValueError(f"Invalid symbol format: {symbol}")
+            normalized.append(s)
+        return normalized
+
 
 class TrainResponse(BaseModel):
     status: str
@@ -167,6 +180,27 @@ class BacktestRequest(BaseModel):
     initial_capital: float = 1_000_000
     start_date: Optional[date] = None
     end_date: Optional[date] = None
+
+    @field_validator("symbol")
+    @classmethod
+    def validate_symbol(cls, value: str) -> str:
+        s = value.strip().upper()
+        if not re.match(r"^[A-Z0-9][A-Z0-9.\-]{0,14}$", s):
+            raise ValueError("Invalid symbol format")
+        return s
+
+    @field_validator("initial_capital")
+    @classmethod
+    def validate_initial_capital(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("initial_capital must be > 0")
+        return value
+
+    @model_validator(mode="after")
+    def validate_date_range(self):
+        if self.start_date and self.end_date and self.start_date > self.end_date:
+            raise ValueError("start_date must be <= end_date")
+        return self
 
 
 class Trade(BaseModel):
@@ -228,3 +262,14 @@ class HealthResponse(BaseModel):
     uptime_seconds: float
     models_loaded: list[str]
     data_available: bool
+
+
+class ErrorDetail(BaseModel):
+    field: Optional[str] = None
+    message: str
+
+
+class ErrorResponse(BaseModel):
+    error_code: str
+    message: str
+    details: list[ErrorDetail] = []
