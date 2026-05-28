@@ -1,0 +1,600 @@
+# 🏦 Mutual Fund Prediction System — Detailed Implementation Plan (v3)
+
+**ระบบวิเคราะห์และพยากรณ์กองทุนรวมหุ้นไทย แบบมืออาชีพ ครบวงจร**
+
+---
+
+## 1. System Architecture Overview
+
+```mermaid
+graph TB
+    subgraph Frontend ["🖥️ Frontend (Vite + React)"]
+        UI[React SPA]
+        Charts[Plotly.js Charts]
+        Router[React Router]
+    end
+
+    subgraph Backend ["⚙️ Backend (FastAPI)"]
+        API[REST API Layer]
+        subgraph Services ["Business Logic"]
+            DC[Data Collector]
+            FE[Feature Engine]
+            ML[ML Models]
+            PO[Portfolio Optimizer]
+            BT[Backtesting Engine]
+        end
+        DB[(SQLite DB)]
+        Models[(Saved Models)]
+    end
+
+    subgraph External ["🌐 External"]
+        YF[yfinance API]
+        SET[SET Market Data]
+    end
+
+    UI --> API
+    API --> Services
+    DC --> YF
+    DC --> DB
+    FE --> DB
+    ML --> Models
+    ML --> DB
+    PO --> DB
+    BT --> ML
+```
+
+---
+
+## 2. Domain Knowledge — กองทุนรวมหุ้นไทย
+
+### 2.1 ข้อมูลพื้นฐาน
+| หัวข้อ | รายละเอียด |
+|--------|-----------|
+| **ตลาด** | SET (Stock Exchange of Thailand) + mai |
+| **ประเภทกองทุน** | Equity Fund — ลงทุนหุ้น ≥65% ของ NAV |
+| **NAV** | Net Asset Value — มูลค่าทรัพย์สินสุทธิต่อหน่วย คำนวณทุกสิ้นวัน |
+| **Benchmark** | SET Index, SET50, SET100 |
+| **ผู้กำกับ** | SEC Thailand (สำนักงาน ก.ล.ต.) |
+| **AMCs ตัวอย่าง** | SCBAM, KAsset, BBLAM, ONEAM, TISCO |
+
+### 2.2 ข้อมูลที่ระบบจะ Track
+- **หุ้น SET ตัวอย่าง** (Top 15 ที่สำคัญ):
+  `PTT.BK`, `ADVANC.BK`, `SCC.BK`, `CPALL.BK`, `AOT.BK`, `BDMS.BK`, `KBANK.BK`, `SCB.BK`, `GULF.BK`, `DELTA.BK`, `TRUE.BK`, `BEM.BK`, `MINT.BK`, `CPN.BK`, `HMPRO.BK`
+
+- **ข้อมูลต่อหุ้น**: Open, High, Low, Close, Adj Close, Volume (OHLCV)
+- **NAV กองทุน**: จำลองจากถ่วงน้ำหนักหุ้นในพอร์ต (weighted average)
+- **ข้อมูลย้อนหลัง**: 3–5 ปี สำหรับ training
+
+### 2.3 วิธีจำลองกองทุน (Fund Simulation)
+ระบบจะสร้าง **Sample Funds** จากกลุ่มหุ้นจริง:
+
+| Fund Name | สไตล์ | Holdings |
+|-----------|-------|----------|
+| **TH-Growth** | Growth | ADVANC, DELTA, TRUE, GULF, AOT |
+| **TH-Value** | Value | PTT, SCC, KBANK, SCB, HMPRO |
+| **TH-Dividend** | Dividend | CPALL, CPN, BDMS, BEM, MINT |
+| **TH-BlueChip** | Large Cap | PTT, ADVANC, SCC, CPALL, KBANK |
+
+---
+
+## 3. Data Pipeline (รายละเอียด)
+
+### 3.1 Data Collection Flow
+
+```mermaid
+sequenceDiagram
+    participant CLI as CLI/API
+    participant DC as DataCollector
+    participant YF as yfinance
+    participant PP as Preprocessor
+    participant DB as SQLite
+
+    CLI->>DC: collect(symbols, period)
+    DC->>YF: download(symbol.BK, start, end)
+    YF-->>DC: OHLCV DataFrame
+    DC->>PP: clean & validate
+    PP->>PP: handle missing (ffill)
+    PP->>PP: calculate adjusted returns
+    PP->>DB: store raw prices
+    DC->>DC: calculate fund NAV (weighted avg)
+    DC->>DB: store fund NAV
+```
+
+### 3.2 Data Preprocessing Pipeline
+
+| ขั้นตอน | รายละเอียด | เหตุผล |
+|---------|-----------|--------|
+| **Missing Values** | Forward-fill + linear interpolation | ตลาดปิดวันหยุด |
+| **Outlier Detection** | Z-score > 3 → cap ที่ 3σ | กันค่าผิดปกติ |
+| **Normalization** | MinMaxScaler (0-1) สำหรับ LSTM | Neural net ต้องการ scaled data |
+| **Stationarity** | Log returns + differencing | LSTM ทำงานได้ดีกับ stationary data |
+| **Train/Val/Test Split** | 70/15/15 (time-ordered) | ไม่สับลำดับเวลา (no data leakage) |
+
+### 3.3 SQLite Schema
+
+```sql
+-- ราคาหุ้นรายวัน
+CREATE TABLE stock_prices (
+    id INTEGER PRIMARY KEY,
+    symbol TEXT NOT NULL,
+    date DATE NOT NULL,
+    open REAL, high REAL, low REAL, close REAL,
+    adj_close REAL, volume INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(symbol, date)
+);
+
+-- NAV กองทุนรายวัน
+CREATE TABLE fund_nav (
+    id INTEGER PRIMARY KEY,
+    fund_name TEXT NOT NULL,
+    date DATE NOT NULL,
+    nav REAL, daily_return REAL,
+    UNIQUE(fund_name, date)
+);
+
+-- ผลพยากรณ์
+CREATE TABLE predictions (
+    id INTEGER PRIMARY KEY,
+    symbol TEXT, model_name TEXT,
+    prediction_date DATE, target_date DATE,
+    predicted_price REAL, actual_price REAL,
+    confidence REAL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ข้อมูล Technical Indicators (cached)
+CREATE TABLE technical_indicators (
+    id INTEGER PRIMARY KEY,
+    symbol TEXT, date DATE,
+    sma_20 REAL, sma_50 REAL, ema_12 REAL, ema_26 REAL,
+    rsi_14 REAL, macd REAL, macd_signal REAL,
+    bb_upper REAL, bb_middle REAL, bb_lower REAL,
+    atr_14 REAL, obv REAL, adx REAL,
+    UNIQUE(symbol, date)
+);
+```
+
+---
+
+## 4. Feature Engineering (25+ Features)
+
+### 4.1 Feature Categories
+
+| Category | Features | จำนวน |
+|----------|----------|-------|
+| **Trend** | SMA(20,50,200), EMA(12,26), MACD, MACD Signal, MACD Histogram, ADX | 9 |
+| **Momentum** | RSI(14), Stochastic %K, Stochastic %D, Williams %R, ROC(10) | 5 |
+| **Volatility** | Bollinger Upper/Mid/Lower, ATR(14), Historical Volatility(20) | 5 |
+| **Volume** | OBV, VWAP, Volume SMA(20), Volume Ratio | 4 |
+| **Price-derived** | Daily Return, Log Return, Price/SMA50 Ratio | 3 |
+| **Lag Features** | Close_lag(1,3,5,10), Return_lag(1,3,5) | 7 |
+
+**รวม: 33 features** ต่อหุ้น
+
+### 4.2 Feature Importance Analysis
+- XGBoost จะคำนวณ **feature importance** โดยอัตโนมัติ
+- แสดงผล Top 15 features ที่มีผลต่อ prediction มากที่สุด
+- ใช้เป็น feedback loop: features ที่ไม่มีประโยชน์จะถูกลบออก
+
+---
+
+## 5. ML Models (รายละเอียด)
+
+### 5.1 Model Architecture
+
+```mermaid
+graph LR
+    subgraph Input ["📊 Input Data"]
+        RAW[OHLCV + Features]
+    end
+
+    subgraph LSTM_Pipeline ["🧠 LSTM Pipeline"]
+        SEQ[Sequence Builder<br/>60-day windows]
+        L1[LSTM Layer 1<br/>128 units]
+        D1[Dropout 0.2]
+        L2[LSTM Layer 2<br/>64 units]
+        D2[Dropout 0.2]
+        Dense1[Dense 32 → ReLU]
+        Out1[Dense 1 → Linear]
+    end
+
+    subgraph XGB_Pipeline ["🌲 XGBoost Pipeline"]
+        FEAT[Feature Matrix<br/>33 indicators]
+        XGB[XGBRegressor<br/>n_estimators=500<br/>max_depth=6<br/>lr=0.01]
+        Out2[Prediction]
+    end
+
+    subgraph Ensemble ["🎯 Ensemble"]
+        W[Weighted Average<br/>α×LSTM + β×XGB]
+        FINAL[Final Prediction]
+    end
+
+    RAW --> SEQ --> L1 --> D1 --> L2 --> D2 --> Dense1 --> Out1
+    RAW --> FEAT --> XGB --> Out2
+    Out1 --> W
+    Out2 --> W
+    W --> FINAL
+```
+
+### 5.2 LSTM Model Detail
+
+| Parameter | Value | เหตุผล |
+|-----------|-------|--------|
+| **Sequence Length** | 60 days | จับ pattern 3 เดือน |
+| **Layer 1** | LSTM(128, return_sequences=True) | เรียนรู้ pattern ระยะยาว |
+| **Layer 2** | LSTM(64) | compress features |
+| **Dropout** | 0.2 (ทั้ง 2 layers) | ป้องกัน overfitting |
+| **Dense** | 32 units, ReLU | non-linear transformation |
+| **Output** | 1 unit, Linear | ทำนายราคา 1 วัน |
+| **Optimizer** | Adam, lr=0.001 | converge เร็ว |
+| **Loss** | Huber Loss | robust ต่อ outliers |
+| **Epochs** | 100 + Early Stopping (patience=10) | กัน overfit |
+| **Batch Size** | 32 | balance speed/accuracy |
+
+### 5.3 XGBoost Model Detail
+
+| Parameter | Value | เหตุผล |
+|-----------|-------|--------|
+| **n_estimators** | 500 | จำนวน trees เพียงพอ |
+| **max_depth** | 6 | กัน overfitting |
+| **learning_rate** | 0.01 | เรียนรู้ช้า = generalize ดี |
+| **subsample** | 0.8 | ใช้ 80% ของ data ต่อ tree |
+| **colsample_bytree** | 0.8 | ใช้ 80% ของ features ต่อ tree |
+| **reg_alpha (L1)** | 0.1 | sparsity regularization |
+| **reg_lambda (L2)** | 1.0 | ridge regularization |
+| **objective** | reg:squarederror | regression task |
+| **eval_metric** | RMSE | ใช้ RMSE ในการ eval |
+
+### 5.4 Ensemble Strategy
+- **Static**: `0.4 × LSTM + 0.6 × XGBoost` (XGBoost มักแม่นกว่าใน structured data)
+- **Dynamic**: ปรับ weight ตาม recent 30-day RMSE ของแต่ละ model
+
+### 5.5 Walk-Forward Validation
+
+```
+Train Window (expanding):
+|████████████████████████|----TEST----|
+|█████████████████████████████|----TEST----|
+|████████████████████████████████████|----TEST----|
+                                         ↑
+                              Model retrained each step
+```
+
+- แบ่ง data เป็น **rolling windows** แทน fixed split
+- Train บน expanding window → test บน 30 วันถัดไป
+- Retrain ทุก 30 วัน → จับ market regime changes
+- รายงาน average metrics across all folds
+
+### 5.6 Model Evaluation Metrics
+
+| Metric | สูตร | ใช้ดูอะไร |
+|--------|------|----------|
+| **RMSE** | √(Σ(ŷ-y)²/n) | ความผิดพลาดเฉลี่ย |
+| **MAE** | Σ\|ŷ-y\|/n | ความผิดพลาดแบบ absolute |
+| **MAPE** | Σ\|ŷ-y\|/y × 100% | เปอร์เซ็นต์ความผิดพลาด |
+| **Directional Accuracy** | % ที่ทายทิศถูก | ทำนายขึ้น/ลงถูกไหม |
+| **R²** | 1 - SS_res/SS_tot | อธิบายได้กี่ % ของ variance |
+
+---
+
+## 6. Backtesting Engine (ใหม่!)
+
+ระบบจะมี **backtesting engine** สำหรับทดสอบกลยุทธ์การลงทุน:
+
+### 6.1 Trading Signals
+- **BUY**: เมื่อ model ทำนายว่าราคาจะขึ้น >2% ใน 5 วัน + RSI < 70
+- **SELL**: เมื่อ model ทำนายว่าราคาจะลง >2% ใน 5 วัน + RSI > 30
+- **HOLD**: กรณีอื่น ๆ
+
+### 6.2 Performance Metrics
+| Metric | คำอธิบาย |
+|--------|----------|
+| Total Return | ผลตอบแทนรวม |
+| Annualized Return | ผลตอบแทนเฉลี่ยต่อปี |
+| Sharpe Ratio | Risk-adjusted return (target > 1.0) |
+| Max Drawdown | การสูญเสียสูงสุดจากจุดสูงสุด |
+| Win Rate | % ของ trades ที่ได้กำไร |
+| Profit Factor | กำไรรวม / ขาดทุนรวม |
+
+---
+
+## 7. Portfolio Optimization (รายละเอียด)
+
+### 7.1 Optimization Methods
+
+| Method | วิธีการ | เหมาะกับ |
+|--------|--------|---------|
+| **Max Sharpe** | หา weight ที่ให้ Sharpe ratio สูงสุด | นักลงทุนทั่วไป |
+| **Min Volatility** | หา weight ที่เสี่ยงน้อยสุด | นักลงทุนอนุรักษ์นิยม |
+| **Risk Parity** | กระจาย risk contribution เท่ากัน | ต้องการ diversification |
+| **Max Return** | หา weight ที่ให้ return สูงสุด (ภายใน risk budget) | นักลงทุนเชิงรุก |
+
+### 7.2 Efficient Frontier
+- คำนวณจาก **1,000+ random portfolios** + optimization
+- Plot: X = Volatility (σ), Y = Expected Return (μ)
+- แสดง: Optimal portfolios, Capital Market Line
+- User สามารถเลือก risk level ได้จาก slider
+
+### 7.3 Constraints
+- น้ำหนักแต่ละหุ้น: 5% ≤ w ≤ 40% (ไม่กระจุกตัว)
+- ผลรวม weights = 100%
+- Short selling: ไม่อนุญาต (long only)
+
+---
+
+## 8. Backend API (FastAPI) — รายละเอียด
+
+### 8.1 API Architecture
+
+```
+backend/
+├── api/
+│   ├── main.py                 # FastAPI app + lifespan (model loading)
+│   ├── dependencies.py         # Dependency injection (DB, Models)
+│   └── routes/
+│       ├── stocks.py           # Stock data CRUD
+│       ├── funds.py            # Fund NAV & holdings
+│       ├── predictions.py      # ML prediction endpoints
+│       ├── portfolio.py        # Portfolio optimization
+│       ├── backtest.py         # Backtesting endpoints
+│       └── system.py           # Health check, system info
+├── config/
+│   └── settings.py             # Pydantic BaseSettings
+├── data/
+│   ├── collector.py
+│   ├── preprocessor.py
+│   └── storage.py
+├── features/
+│   └── technical_indicators.py
+├── models/
+│   ├── lstm_model.py
+│   ├── xgboost_model.py
+│   ├── ensemble.py
+│   └── trainer.py
+├── portfolio/
+│   └── optimizer.py
+├── backtest/
+│   └── engine.py               # Backtesting simulation engine
+├── schemas/
+│   └── api_schemas.py          # Pydantic request/response models
+└── requirements.txt
+```
+
+### 8.2 Full API Specification
+
+| Route | Method | Request | Response | Description |
+|-------|--------|---------|----------|-------------|
+| `/api/health` | GET | — | `{status, version, uptime}` | Health check |
+| `/api/stocks` | GET | `?sector=` | `[{symbol, name, sector}]` | รายชื่อหุ้นทั้งหมด |
+| `/api/stocks/{symbol}/prices` | GET | `?start=&end=` | `[{date, O,H,L,C,V}]` | ราคาย้อนหลัง |
+| `/api/stocks/{symbol}/indicators` | GET | `?indicators=rsi,macd` | `[{date, rsi, macd, ...}]` | Technical indicators |
+| `/api/stocks/collect` | POST | `{symbols[], period}` | `{status, count}` | Trigger data collection |
+| `/api/funds` | GET | — | `[{name, style, holdings}]` | รายชื่อกองทุน |
+| `/api/funds/{name}/nav` | GET | `?start=&end=` | `[{date, nav, return}]` | NAV history |
+| `/api/predictions/{symbol}` | GET | `?model=ensemble&days=5` | `{predictions[], confidence, signal}` | ผลพยากรณ์ |
+| `/api/predictions/train` | POST | `{symbols[], model_type}` | `{status, metrics}` | Train models |
+| `/api/portfolio/optimize` | POST | `{symbols[], method, risk_level}` | `{weights[], metrics, frontier[]}` | Optimize portfolio |
+| `/api/backtest/run` | POST | `{symbol, model, period}` | `{trades[], metrics}` | Run backtest |
+| `/api/models/performance` | GET | — | `{models: [{name, rmse, mape, ...}]}` | Model metrics |
+| `/api/models/features/{symbol}` | GET | — | `[{feature, importance}]` | Feature importance |
+
+### 8.3 Pydantic Schemas (ตัวอย่าง)
+
+```python
+class StockPrice(BaseModel):
+    date: date
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: int
+
+class PredictionResponse(BaseModel):
+    symbol: str
+    model: str
+    predictions: list[PredictionPoint]
+    signal: Literal["BUY", "SELL", "HOLD"]
+    confidence: float  # 0-100%
+    metrics: ModelMetrics
+
+class PortfolioRequest(BaseModel):
+    symbols: list[str]
+    method: Literal["max_sharpe", "min_volatility", "risk_parity"]
+    risk_level: float = 0.5  # 0-1 slider
+
+class PortfolioResponse(BaseModel):
+    weights: dict[str, float]
+    expected_return: float
+    volatility: float
+    sharpe_ratio: float
+    frontier: list[FrontierPoint]
+```
+
+### 8.4 Model Loading Strategy
+- โหลด trained models ตอน **app startup** ผ่าน FastAPI lifespan
+- เก็บใน memory → inference เร็ว (no disk I/O per request)
+- ถ้า model ยังไม่มี → return warning + ให้ user train ก่อน
+
+---
+
+## 9. Frontend (Vite + React) — รายละเอียด
+
+### 9.1 Frontend Structure
+
+```
+frontend/
+├── src/
+│   ├── api/
+│   │   └── client.js           # Axios instance + interceptors
+│   ├── components/
+│   │   ├── layout/
+│   │   │   ├── Sidebar.jsx     # Navigation sidebar
+│   │   │   ├── Header.jsx      # Top bar with search
+│   │   │   └── Layout.jsx      # Main layout wrapper
+│   │   ├── charts/
+│   │   │   ├── CandlestickChart.jsx
+│   │   │   ├── PredictionChart.jsx
+│   │   │   ├── EfficientFrontier.jsx
+│   │   │   ├── AllocationPie.jsx
+│   │   │   ├── FeatureImportance.jsx
+│   │   │   └── PerformanceLine.jsx
+│   │   └── ui/
+│   │       ├── MetricCard.jsx
+│   │       ├── SignalBadge.jsx
+│   │       ├── LoadingSkeleton.jsx
+│   │       └── StockSelector.jsx
+│   ├── pages/
+│   │   ├── Dashboard.jsx
+│   │   ├── FundAnalysis.jsx
+│   │   ├── Prediction.jsx
+│   │   ├── Portfolio.jsx
+│   │   └── ModelPerformance.jsx
+│   ├── hooks/
+│   │   └── useApi.js           # Custom fetch hook
+│   ├── App.jsx
+│   ├── main.jsx
+│   └── index.css               # Design system
+├── index.html
+├── package.json
+└── vite.config.js              # Proxy to backend :8000
+```
+
+### 9.2 Page Designs
+
+#### 📊 Dashboard (Home)
+| Section | Content |
+|---------|---------|
+| **KPI Cards** (4 cards) | Total Funds, Avg Return (%), Best Performer, Market Status |
+| **Market Overview Chart** | SET Index line chart (30 days) |
+| **Top Movers Table** | หุ้นที่ขึ้น/ลงมากสุดวันนี้ |
+| **Fund Performance** | Bar chart เปรียบเทียบ return ของแต่ละ fund |
+| **Quick Prediction** | Latest prediction signals (BUY/SELL/HOLD) |
+
+#### 📈 Fund Analysis
+| Section | Content |
+|---------|---------|
+| **Stock Selector** | Dropdown เลือกหุ้น / กองทุน |
+| **Candlestick Chart** | OHLC + Volume bars (Plotly interactive) |
+| **Indicator Toggles** | Checkboxes: SMA, EMA, Bollinger, RSI, MACD |
+| **Indicator Subplots** | RSI chart + MACD chart ด้านล่าง |
+| **Stats Panel** | ราคาปัจจุบัน, % Change, 52W High/Low, Volume |
+
+#### 🤖 Prediction
+| Section | Content |
+|---------|---------|
+| **Prediction Chart** | Actual (line) + Predicted (dashed) + Confidence band (shaded) |
+| **Signal Card** | BUY/SELL/HOLD badge ขนาดใหญ่ + เหตุผล |
+| **5-Day Forecast Table** | วันที่, ราคาทำนาย, Confidence %, Direction |
+| **Model Selector** | Toggle: LSTM / XGBoost / Ensemble |
+| **Historical Accuracy** | Mini chart แสดง past prediction accuracy |
+
+#### 💼 Portfolio
+| Section | Content |
+|---------|---------|
+| **Stock Multi-select** | เลือกหุ้นเข้าพอร์ต |
+| **Risk Slider** | ปรับ risk appetite (Conservative ↔ Aggressive) |
+| **Efficient Frontier** | Scatter plot + optimal point highlighted |
+| **Allocation Pie** | สัดส่วนหุ้นแต่ละตัว (donut chart) |
+| **Portfolio Metrics** | Expected Return, Volatility, Sharpe Ratio |
+| **Method Buttons** | Max Sharpe / Min Vol / Risk Parity |
+
+#### 📉 Model Performance
+| Section | Content |
+|---------|---------|
+| **Metrics Table** | Model × Metric matrix (RMSE, MAE, MAPE, DA, R²) |
+| **Loss Curve** | Training vs Validation loss over epochs |
+| **Feature Importance** | Horizontal bar chart Top 15 features |
+| **Prediction Scatter** | Actual vs Predicted scatter + ideal line |
+| **Backtest Results** | Equity curve, Sharpe, Max Drawdown, Win Rate |
+
+### 9.3 Design System
+
+| Element | Specification |
+|---------|--------------|
+| **Background** | `#0a0f1e` (deep navy) |
+| **Card BG** | `#111827` with `rgba(255,255,255,0.05)` border |
+| **Accent Green** | `#10b981` (positive/buy) |
+| **Accent Red** | `#ef4444` (negative/sell) |
+| **Accent Blue** | `#3b82f6` (primary actions) |
+| **Accent Purple** | `#8b5cf6` (secondary) |
+| **Font** | Inter (Google Fonts) |
+| **Cards** | `border-radius: 16px`, `backdrop-filter: blur(20px)` |
+| **Animations** | CSS transitions 0.3s, loading skeletons |
+| **Charts** | Plotly dark template, consistent colors |
+
+---
+
+## 10. Project Files Summary
+
+### Backend Files (14 files)
+
+| File | Lines (est.) | หน้าที่ |
+|------|-------------|--------|
+| `config/settings.py` | ~80 | Config, fund profiles, hyperparams |
+| `data/collector.py` | ~150 | yfinance download, NAV calc |
+| `data/preprocessor.py` | ~120 | Clean, normalize, split |
+| `data/storage.py` | ~130 | SQLite CRUD, cache |
+| `features/technical_indicators.py` | ~200 | 33 technical features |
+| `models/lstm_model.py` | ~150 | LSTM build, train, predict |
+| `models/xgboost_model.py` | ~120 | XGBoost model |
+| `models/ensemble.py` | ~80 | Combine models |
+| `models/trainer.py` | ~180 | Pipeline, walk-forward, metrics |
+| `portfolio/optimizer.py` | ~180 | MPT, Efficient Frontier |
+| `backtest/engine.py` | ~150 | Backtesting simulation |
+| `schemas/api_schemas.py` | ~100 | Pydantic models |
+| `api/main.py` | ~80 | FastAPI app setup |
+| `api/routes/*.py` | ~300 | All 6 route files |
+| **Total** | **~2,020** | |
+
+### Frontend Files (18 files)
+
+| File | Lines (est.) | หน้าที่ |
+|------|-------------|--------|
+| `index.css` | ~300 | Full design system |
+| `api/client.js` | ~50 | Axios setup |
+| `hooks/useApi.js` | ~40 | Custom hook |
+| `components/layout/*.jsx` | ~200 | Layout, Sidebar, Header |
+| `components/charts/*.jsx` | ~500 | 6 chart components |
+| `components/ui/*.jsx` | ~200 | 4 UI components |
+| `pages/*.jsx` | ~600 | 5 pages |
+| `App.jsx` | ~50 | Router |
+| **Total** | **~1,940** | |
+
+**Grand Total: ~4,000 lines of code**
+
+---
+
+## 11. Verification Plan
+
+### Phase 1: Backend Tests
+```bash
+cd d:\AI\fund_predition\backend
+python -m pytest tests/ -v --tb=short
+```
+- ✅ Data collection downloads real SET data
+- ✅ Technical indicators calculate correctly
+- ✅ LSTM model trains and predicts
+- ✅ XGBoost model trains and predicts
+- ✅ Portfolio optimizer returns valid weights
+
+### Phase 2: API Integration Test
+```bash
+uvicorn api.main:app --port 8000
+curl http://localhost:8000/api/health
+curl http://localhost:8000/api/stocks
+curl http://localhost:8000/api/predictions/PTT.BK
+```
+
+### Phase 3: Frontend Visual Test
+- Start frontend → `npm run dev`
+- All 5 pages render without errors
+- Charts interactive (zoom, hover, pan)
+- Dark theme consistent
+- API connected and data flows correctly
+
+### Phase 4: End-to-End
+1. Collect data → Train models → Get predictions
+2. Verify prediction confidence bands appear
+3. Run portfolio optimization → verify valid allocations
+4. Run backtest → verify equity curve plotted
