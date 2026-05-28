@@ -103,3 +103,24 @@ Create a `.env` file in the `backend/` directory:
 ```env
 OPENAI_API_KEY=your-api-key-here
 ```
+
+## Docker Compose
+
+Run full stack with containers:
+
+```bash
+docker compose up --build
+```
+
+Endpoints:
+- Frontend: http://localhost:5173
+- Backend: http://localhost:8000
+- API Docs: http://localhost:8000/docs
+
+## Environment Template
+
+Create `.env` from template:
+
+```bash
+copy backend\.env.example backend\.env
+```

@@ -6,6 +6,8 @@ Models: LSTM, XGBoost, AutoGluon (TabularPredictor).
 
 import numpy as np
 import pandas as pd
+import random
+import json
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from pathlib import Path
 from datetime import datetime
@@ -27,6 +29,11 @@ class ModelTrainer:
     """Unified training pipeline for LSTM, XGBoost, AutoGluon, and Ensemble models."""
 
     def __init__(self):
+        # Reproducibility baseline for all training flows.
+        self.seed = 42
+        random.seed(self.seed)
+        np.random.seed(self.seed)
+
         self.preprocessor = DataPreprocessor()
         self.lstm_model = None
         self.xgb_model = None
@@ -35,6 +42,34 @@ class ModelTrainer:
         self.metrics = {}
         self.model_dir = Path(settings.model_dir)
         self.model_dir.mkdir(parents=True, exist_ok=True)
+
+    def _save_model_metadata(
+        self,
+        symbol: str,
+        model_name: str,
+        df: pd.DataFrame,
+        metrics: dict,
+        extra: Optional[dict] = None,
+    ) -> None:
+        """Persist per-run model metadata for traceability."""
+        safe_symbol = symbol.replace(".", "_")
+        out_path = self.model_dir / f"metadata_{model_name}_{safe_symbol}.json"
+
+        payload = {
+            "symbol": symbol,
+            "model_name": model_name,
+            "trained_at_utc": datetime.utcnow().isoformat() + "Z",
+            "seed": self.seed,
+            "row_count": int(len(df)),
+            "date_start": str(df.index.min()) if len(df) > 0 else None,
+            "date_end": str(df.index.max()) if len(df) > 0 else None,
+            "metrics": {k: v for k, v in metrics.items() if k != "training"},
+        }
+        if extra:
+            payload["extra"] = extra
+
+        out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        logger.info("Saved model metadata to %s", out_path)
 
     def _get_sentiment_df(self, symbol: str) -> Optional[pd.DataFrame]:
         """Load daily sentiment scores for a symbol from DB."""
@@ -97,6 +132,20 @@ class ModelTrainer:
 
         self.metrics[f"lstm_{symbol}"] = metrics
         logger.info("LSTM %s metrics: %s", symbol, {k: v for k, v in metrics.items() if k != "training"})
+        self._save_model_metadata(
+            symbol=symbol,
+            model_name="lstm",
+            df=df,
+            metrics=metrics,
+            extra={
+                "params": {
+                    "sequence_length": LSTM_PARAMS.get("sequence_length"),
+                    "epochs": LSTM_PARAMS.get("epochs"),
+                    "batch_size": LSTM_PARAMS.get("batch_size"),
+                },
+                "feature_cols": data.get("feature_cols", []),
+            },
+        )
         return metrics
 
     def train_xgboost(self, df: pd.DataFrame, symbol: str, sentiment_df=None) -> dict:
@@ -142,6 +191,20 @@ class ModelTrainer:
 
         self.metrics[f"xgboost_{symbol}"] = metrics
         logger.info("XGBoost %s metrics: %s", symbol, {k: v for k, v in metrics.items() if k != "training"})
+        self._save_model_metadata(
+            symbol=symbol,
+            model_name="xgboost",
+            df=df,
+            metrics=metrics,
+            extra={
+                "params": {
+                    "n_estimators": XGBOOST_PARAMS.get("n_estimators"),
+                    "max_depth": XGBOOST_PARAMS.get("max_depth"),
+                    "learning_rate": XGBOOST_PARAMS.get("learning_rate"),
+                },
+                "feature_count": len(data.get("feature_names", [])),
+            },
+        )
         return metrics
 
     def train_autogluon(self, df: pd.DataFrame, symbol: str, sentiment_df=None) -> dict:
@@ -184,6 +247,19 @@ class ModelTrainer:
 
         self.metrics[f"autogluon_{symbol}"] = metrics
         logger.info("AutoGluon %s metrics: %s", symbol, {k: v for k, v in metrics.items() if k != "training"})
+        self._save_model_metadata(
+            symbol=symbol,
+            model_name="autogluon",
+            df=df,
+            metrics=metrics,
+            extra={
+                "params": {
+                    "time_limit": AUTOGLUON_PARAMS.get("time_limit"),
+                    "preset": AUTOGLUON_PARAMS.get("preset"),
+                },
+                "feature_count": len(data.get("feature_names", [])),
+            },
+        )
         return metrics
 
     def train_all(self, df: pd.DataFrame, symbol: str) -> dict:
