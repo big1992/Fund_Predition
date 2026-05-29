@@ -5,6 +5,7 @@ export default function PredictionResultSection({
     prediction,
     stocks,
     selected,
+    validationReport,
     aiLoading,
     aiExplanation,
     onRefreshAi,
@@ -12,6 +13,17 @@ export default function PredictionResultSection({
     const pred = prediction?.predictions || [];
     const signal = prediction?.signal || 'HOLD';
     const { symbol: currencySymbol, label: currencyLabel } = getCurrencyInfo(stocks, selected);
+    const cards = validationReport?.cards || [];
+    const ensembleCard = cards.find(c => c.model_name === 'ensemble');
+    const trustStatus = ensembleCard?.status || 'reference';
+    const trustColor = trustStatus === 'pass'
+        ? 'var(--accent-green)'
+        : trustStatus === 'warn'
+            ? 'var(--accent-yellow)'
+            : trustStatus === 'fail'
+                ? 'var(--accent-red)'
+                : 'var(--accent-cyan)';
+    const topCaveats = cards.flatMap(c => c.caveats || []).filter(Boolean).slice(0, 3);
 
     return (
         <>
@@ -31,6 +43,13 @@ export default function PredictionResultSection({
                 <div className="metric-card purple">
                     <div className="metric-label">Confidence</div>
                     <div className="metric-value">{prediction.confidence?.toFixed(1)}%</div>
+                    <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-muted)', textTransform: 'capitalize' }}>
+                        {prediction.confidence_band || 'n/a'}
+                    </div>
+                </div>
+                <div className="metric-card orange">
+                    <div className="metric-label">Disagreement</div>
+                    <div className="metric-value">{typeof prediction.model_disagreement_pct === 'number' ? `${prediction.model_disagreement_pct.toFixed(2)}%` : 'n/a'}</div>
                 </div>
                 <div className="metric-card red">
                     <div className="metric-label">Model</div>
@@ -61,6 +80,30 @@ export default function PredictionResultSection({
                 )}
             </div>
 
+            <div className="grid-2" style={{ marginBottom: 20 }}>
+                <div className="card" style={{ borderLeft: `3px solid ${trustColor}` }}>
+                    <div className="card-header"><span className="card-title">Model Trust Snapshot</span></div>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 8 }}>
+                        Validation status: <span style={{ color: trustColor, fontWeight: 700, textTransform: 'uppercase' }}>{trustStatus}</span>
+                    </p>
+                    <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>
+                        {ensembleCard?.summary || 'No ensemble validation summary available for this symbol yet.'}
+                    </p>
+                </div>
+                <div className="card" style={{ borderLeft: '3px solid var(--accent-yellow)' }}>
+                    <div className="card-header"><span className="card-title">Risk Caveats</span></div>
+                    {topCaveats.length > 0 ? (
+                        <ul style={{ margin: 0, paddingLeft: 18, color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.8 }}>
+                            {topCaveats.map((item, i) => <li key={i}>{item}</li>)}
+                        </ul>
+                    ) : (
+                        <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>
+                            Caveat details are not available yet. Run/retrain models to populate reliability notes.
+                        </p>
+                    )}
+                </div>
+            </div>
+
             <div className="grid-2">
                 <div className="card">
                     <div className="card-header"><span className="card-title">Forecast — {selected}</span></div>
@@ -73,11 +116,13 @@ export default function PredictionResultSection({
                                     line: { color: '#3b82f6', width: 3, dash: 'dash' }, marker: { size: 8 },
                                 },
                                 {
-                                    x: pred.map(p => p.date), y: pred.map(p => p.predicted_price * 1.02),
+                                    x: pred.map(p => p.date),
+                                    y: pred.map(p => (typeof p.predicted_high === 'number' ? p.predicted_high : p.predicted_price * 1.02)),
                                     type: 'scatter', mode: 'lines', name: 'Upper Band', line: { width: 0 }, showlegend: false,
                                 },
                                 {
-                                    x: pred.map(p => p.date), y: pred.map(p => p.predicted_price * 0.98),
+                                    x: pred.map(p => p.date),
+                                    y: pred.map(p => (typeof p.predicted_low === 'number' ? p.predicted_low : p.predicted_price * 0.98)),
                                     type: 'scatter', mode: 'lines', name: 'Lower Band', line: { width: 0 }, showlegend: false,
                                     fill: 'tonexty', fillcolor: 'rgba(59,130,246,0.1)',
                                 },
@@ -96,12 +141,15 @@ export default function PredictionResultSection({
                 <div className="card">
                     <div className="card-header"><span className="card-title">Forecast Table</span></div>
                     <table className="data-table">
-                        <thead><tr><th>Date</th><th>Predicted Price</th><th>Confidence</th></tr></thead>
+                        <thead><tr><th>Date</th><th>Downside</th><th>Base</th><th>Upside</th><th>Uncertainty</th><th>Confidence</th></tr></thead>
                         <tbody>
                             {pred.map((p, i) => (
                                 <tr key={i}>
                                     <td>{p.date}</td>
+                                    <td>{currencySymbol}{(typeof p.predicted_low === 'number' ? p.predicted_low : p.predicted_price * 0.98).toFixed(2)}</td>
                                     <td style={{ fontWeight: 600 }}>{currencySymbol}{p.predicted_price.toFixed(2)}</td>
+                                    <td>{currencySymbol}{(typeof p.predicted_high === 'number' ? p.predicted_high : p.predicted_price * 1.02).toFixed(2)}</td>
+                                    <td>{typeof p.uncertainty_pct === 'number' ? `${p.uncertainty_pct.toFixed(2)}%` : 'n/a'}</td>
                                     <td>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                             <div style={{ flex: 1, background: 'var(--bg-input)', borderRadius: 4, height: 6, overflow: 'hidden' }}>
@@ -116,7 +164,13 @@ export default function PredictionResultSection({
                     </table>
                 </div>
             </div>
+
+            <div className="card" style={{ marginTop: 20, border: '1px dashed rgba(245, 158, 11, 0.5)', background: 'rgba(245, 158, 11, 0.05)' }}>
+                <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.7 }}>
+                    This output is research analytics, not investment advice. Use downside/base/upside range, disagreement, and confidence
+                    together with your own risk limits before making any trade decision.
+                </p>
+            </div>
         </>
     );
 }
-

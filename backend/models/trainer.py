@@ -14,9 +14,10 @@ from datetime import datetime, timezone
 import logging
 from typing import Optional
 
-from config.settings import LSTM_PARAMS, XGBOOST_PARAMS, AUTOGLUON_PARAMS, DATA_SETTINGS, settings
+from config.settings import LSTM_PARAMS, XGBOOST_PARAMS, AUTOGLUON_PARAMS, DATA_SETTINGS, STOCK_UNIVERSE, settings
 from data.preprocessor import DataPreprocessor
 from features.technical_indicators import TechnicalIndicators
+from models.baselines import evaluate_price_baselines
 from models.lstm_model import LSTMModel
 from models.xgboost_model import XGBoostModel
 from models.autogluon_model import AutoGluonModel
@@ -83,6 +84,50 @@ class ModelTrainer:
             logger.warning("Could not load sentiment for %s: %s", symbol, e)
         return None
 
+    def _get_benchmark_df(self, symbol: str) -> Optional[pd.DataFrame]:
+        """Load a stored benchmark series when one is available in the local DB."""
+        candidates = []
+        market = STOCK_UNIVERSE.get(symbol, {}).get("market", "")
+
+        if symbol.endswith(".BK") or market == "SET":
+            candidates = ["SET.BK", "SET50.BK", "^SET.BK", "^SET50.BK"]
+        elif market in ("NASDAQ", "NYSE") or not symbol.endswith(".BK"):
+            candidates = ["SPY", "QQQ", "^GSPC", "^IXIC"]
+
+        try:
+            from data.storage import DatabaseManager
+            db = DatabaseManager(settings.db_path)
+            for candidate in candidates:
+                if candidate == symbol:
+                    continue
+                df = db.get_stock_prices(candidate)
+                if not df.empty and "close" in df.columns:
+                    logger.info("Using %s as benchmark for %s", candidate, symbol)
+                    return df
+        except Exception as e:
+            logger.warning("Could not load benchmark for %s: %s", symbol, e)
+
+        return None
+
+    def evaluate_baselines(self, df: pd.DataFrame, symbol: str) -> dict:
+        """Evaluate simple baseline rows and store them with model metrics."""
+        try:
+            baselines = evaluate_price_baselines(
+                df,
+                benchmark_df=self._get_benchmark_df(symbol),
+            )
+        except Exception as e:
+            logger.warning("Baseline evaluation failed for %s: %s", symbol, e)
+            return {}
+
+        for name, metrics in baselines.items():
+            self.metrics[f"{name}_{symbol}"] = metrics
+
+        if baselines:
+            logger.info("Baseline %s metrics: %s", symbol, baselines)
+
+        return baselines
+
     def train_lstm(self, df: pd.DataFrame, symbol: str, sentiment_df=None) -> dict:
         """Train LSTM model on price data."""
         logger.info("Training LSTM for %s...", symbol)
@@ -142,8 +187,10 @@ class ModelTrainer:
                     "sequence_length": LSTM_PARAMS.get("sequence_length"),
                     "epochs": LSTM_PARAMS.get("epochs"),
                     "batch_size": LSTM_PARAMS.get("batch_size"),
+                    "validation_gap_days": DATA_SETTINGS.get("validation_gap_days", 0),
                 },
                 "feature_cols": data.get("feature_cols", []),
+                "split_meta": data.get("split_meta", {}),
             },
         )
         return metrics
@@ -201,8 +248,10 @@ class ModelTrainer:
                     "n_estimators": XGBOOST_PARAMS.get("n_estimators"),
                     "max_depth": XGBOOST_PARAMS.get("max_depth"),
                     "learning_rate": XGBOOST_PARAMS.get("learning_rate"),
+                    "validation_gap_days": DATA_SETTINGS.get("validation_gap_days", 0),
                 },
                 "feature_count": len(data.get("feature_names", [])),
+                "split_meta": data.get("split_meta", {}),
             },
         )
         return metrics
@@ -256,8 +305,10 @@ class ModelTrainer:
                 "params": {
                     "time_limit": AUTOGLUON_PARAMS.get("time_limit"),
                     "preset": AUTOGLUON_PARAMS.get("preset"),
+                    "validation_gap_days": DATA_SETTINGS.get("validation_gap_days", 0),
                 },
                 "feature_count": len(data.get("feature_names", [])),
+                "split_meta": data.get("split_meta", {}),
             },
         )
         return metrics
@@ -265,7 +316,7 @@ class ModelTrainer:
     def train_all(self, df: pd.DataFrame, symbol: str) -> dict:
         """Train LSTM, XGBoost, and AutoGluon models, then auto-adjust ensemble weights."""
         sentiment_df = self._get_sentiment_df(symbol)
-        results = {}
+        results = self.evaluate_baselines(df, symbol)
 
         try:
             results["lstm"] = self.train_lstm(df, symbol, sentiment_df=sentiment_df)
@@ -423,6 +474,7 @@ class ModelTrainer:
             "walk_forward": True,
             "total_folds": len(fold_ends),
         }
+        results.update(self.evaluate_baselines(df, symbol))
 
         # Log per-fold metrics for analysis
         if all_lstm_metrics:
@@ -455,6 +507,8 @@ class ModelTrainer:
             "signal": "HOLD",
             "signal_reason": "",
             "confidence": 0.0,
+            "model_disagreement_pct": None,
+            "confidence_band": None,
             "current_price": float(df["close"].iloc[-1]) if "close" in df.columns else 0.0,
         }
 
@@ -569,22 +623,36 @@ class ModelTrainer:
 
                 # 3) Model agreement bonus (for ensemble): if models agree on direction, boost confidence
                 agreement_bonus = 0.0
+                disagreement_pct = None
                 if model_type == "ensemble":
-                    directions = []
+                    directional_preds = []
                     if lstm_preds is not None and len(lstm_preds) > 0:
-                        directions.append(1 if lstm_preds[-1] > current_price else -1)
+                        directional_preds.append(float(lstm_preds[-1]))
                     if xgb_preds is not None and len(xgb_preds) > 0:
-                        directions.append(1 if xgb_preds[-1] > current_price else -1)
+                        directional_preds.append(float(xgb_preds[-1]))
                     if ag_preds is not None and len(ag_preds) > 0:
-                        directions.append(1 if ag_preds[-1] > current_price else -1)
+                        directional_preds.append(float(ag_preds[-1]))
+                    directions = [1 if p > current_price else -1 for p in directional_preds]
                     if len(directions) >= 2:
                         # All agree = +10%, 2 out of 3 agree = +5%
                         if all(d == directions[0] for d in directions):
                             agreement_bonus = 10.0
                         elif sum(d == directions[0] for d in directions) >= 2:
                             agreement_bonus = 5.0
+                    if len(directional_preds) >= 2:
+                        spread_pct = (max(directional_preds) - min(directional_preds)) / max(current_price, 1e-9) * 100.0
+                        disagreement_pct = round(max(0.0, spread_pct), 2)
+                        agreement_bonus -= min(12.0, disagreement_pct * 0.8)
 
-                result["confidence"] = round(min(95.0, base_confidence + signal_bonus + agreement_bonus), 1)
+                calibrated_conf = min(95.0, max(15.0, base_confidence + signal_bonus + agreement_bonus))
+                result["confidence"] = round(calibrated_conf, 1)
+                result["model_disagreement_pct"] = disagreement_pct
+                if calibrated_conf >= 75:
+                    result["confidence_band"] = "high"
+                elif calibrated_conf >= 50:
+                    result["confidence_band"] = "medium"
+                else:
+                    result["confidence_band"] = "low"
 
             # Format predictions
             last_date = df.index[-1] if hasattr(df.index[-1], 'strftime') else pd.Timestamp.now()
@@ -597,10 +665,16 @@ class ModelTrainer:
 
                 # Per-day confidence decreases slightly for farther predictions
                 day_confidence = round(result["confidence"] * (1 - i * 0.03), 1)
+                uncertainty_pct = self._estimate_uncertainty_pct(symbol, model_type, day_index=i)
+                predicted_low = float(pred) * (1.0 - uncertainty_pct)
+                predicted_high = float(pred) * (1.0 + uncertainty_pct)
 
                 result["predictions"].append({
                     "date": target_date.strftime("%Y-%m-%d"),
                     "predicted_price": round(float(pred), 2),
+                    "predicted_low": round(float(predicted_low), 2),
+                    "predicted_high": round(float(predicted_high), 2),
+                    "uncertainty_pct": round(float(uncertainty_pct) * 100.0, 2),
                     "confidence": day_confidence,
                 })
 
@@ -609,6 +683,26 @@ class ModelTrainer:
             result["signal_reason"] = f"Error: {str(e)}"
 
         return result
+
+    def _estimate_uncertainty_pct(self, symbol: str, model_type: str, day_index: int) -> float:
+        """
+        Estimate forecast uncertainty from available validation error.
+        Uses MAPE-derived uncertainty scaled by horizon growth.
+        """
+        metric_keys = [f"{model_type}_{symbol}", f"autogluon_{symbol}", f"xgboost_{symbol}", f"lstm_{symbol}"]
+        mape = None
+        for key in metric_keys:
+            val = self.metrics.get(key, {}).get("mape")
+            if isinstance(val, (int, float)) and val > 0:
+                mape = float(val)
+                break
+
+        base_uncertainty = (mape / 100.0) if mape is not None else 0.03
+        base_uncertainty = max(0.01, min(0.20, base_uncertainty))
+
+        horizon_scale = (day_index + 1) ** 0.5
+        uncertainty = base_uncertainty * horizon_scale
+        return max(0.01, min(0.35, uncertainty))
 
     def _predict_lstm(self, df: pd.DataFrame, n_days: int, sentiment_df=None) -> np.ndarray:
         """Generate LSTM predictions using multi-feature input.

@@ -114,6 +114,9 @@ class FundNAVResponse(APIBaseModel):
 class PredictionPoint(APIBaseModel):
     date: date
     predicted_price: float
+    predicted_low: Optional[float] = None
+    predicted_high: Optional[float] = None
+    uncertainty_pct: Optional[float] = None
     confidence: float  # 0-100
 
 
@@ -125,6 +128,8 @@ class PredictionResponse(APIBaseModel):
     signal: Literal["BUY", "SELL", "HOLD"]
     signal_reason: str
     confidence: float
+    model_disagreement_pct: Optional[float] = None
+    confidence_band: Optional[Literal["low", "medium", "high"]] = None
 
 
 class TrainRequest(APIBaseModel):
@@ -240,6 +245,10 @@ class ModelMetrics(APIBaseModel):
     mape: float
     directional_accuracy: float
     r_squared: float
+    baseline_type: Optional[str] = None
+    total_return: Optional[float] = None
+    max_drawdown: Optional[float] = None
+    description: Optional[str] = None
 
 
 class FeatureImportance(APIBaseModel):
@@ -255,6 +264,79 @@ class FeatureImportanceResponse(APIBaseModel):
     symbol: str
     model: str
     features: list[FeatureImportance]
+
+
+class ValidationReportCard(APIBaseModel):
+    model_name: str
+    status: str
+    rmse: Optional[float] = None
+    mae: Optional[float] = None
+    mape: Optional[float] = None
+    directional_accuracy: Optional[float] = None
+    r_squared: Optional[float] = None
+    baseline_name: Optional[str] = None
+    baseline_mape: Optional[float] = None
+    mape_improvement_pct: Optional[float] = None
+    caveats: list[str] = []
+
+
+class ValidationReportResponse(APIBaseModel):
+    symbol: str
+    generated_at_utc: str
+    cards: list[ValidationReportCard]
+
+
+class ModelRegistryEntry(APIBaseModel):
+    id: int
+    symbol: str
+    model_name: str
+    version: int
+    training_run_id: Optional[int] = None
+    train_start_date: Optional[str] = None
+    train_end_date: Optional[str] = None
+    feature_version: Optional[str] = None
+    artifact_path: Optional[str] = None
+    created_at: Optional[str] = None
+    is_deployed: bool = False
+    is_best_run: bool = False
+    metrics: dict = {}
+    params: dict = {}
+
+
+class ModelRegistryResponse(APIBaseModel):
+    symbol: str
+    entries: list[ModelRegistryEntry]
+
+
+class DriftStatusEntry(APIBaseModel):
+    symbol: str
+    model_name: str
+    status: str
+    drift_score: float
+    should_retrain: bool
+    reasons: list[str] = []
+    metrics: dict = {}
+    created_at: Optional[str] = None
+
+
+class DriftStatusResponse(APIBaseModel):
+    symbol: str
+    entries: list[DriftStatusEntry]
+
+
+class AlertEntry(APIBaseModel):
+    id: Optional[int] = None
+    symbol: str
+    alert_type: str
+    severity: str
+    message: str
+    payload: dict = {}
+    created_at: Optional[str] = None
+
+
+class AlertResponse(APIBaseModel):
+    symbol: str
+    alerts: list[AlertEntry]
 
 
 # ============== System Schemas ==============

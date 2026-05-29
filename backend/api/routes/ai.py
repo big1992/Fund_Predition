@@ -1,13 +1,16 @@
-"""
+﻿"""
 AI-powered explanation routes.
 """
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, ConfigDict
 from typing import Optional
+
+from fastapi import APIRouter
+from pydantic import BaseModel, ConfigDict
+
 from api.main import app_state
 
 router = APIRouter()
+
 
 class AIBaseModel(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
@@ -33,13 +36,21 @@ class ExplainResponse(AIBaseModel):
     available: bool = True
 
 
+def _unavailable_message(explainer, *, training: bool = False) -> str:
+    if explainer and hasattr(explainer, "get_unavailable_message"):
+        return explainer.get_unavailable_message()
+    if training:
+        return "AI analysis unavailable — service is not ready"
+    return "AI explanation unavailable — service is not ready"
+
+
 @router.post("/explain-prediction", response_model=ExplainResponse)
 async def explain_prediction(request: PredictionExplainRequest):
     """Get AI explanation for a prediction signal."""
     explainer = app_state.get("ai_explainer")
     if not explainer or not explainer.is_available():
         return ExplainResponse(
-            explanation="⚠️ AI explanation unavailable — OPENAI_API_KEY not configured",
+            explanation=f"⚠️ {_unavailable_message(explainer)}",
             available=False,
         )
 
@@ -61,7 +72,7 @@ async def explain_performance(request: PerformanceExplainRequest):
     explainer = app_state.get("ai_explainer")
     if not explainer or not explainer.is_available():
         return ExplainResponse(
-            explanation="⚠️ AI explanation unavailable — OPENAI_API_KEY not configured",
+            explanation=f"⚠️ {_unavailable_message(explainer)}",
             available=False,
         )
 
@@ -92,7 +103,7 @@ async def explain_training(request: TrainingExplainRequest):
     explainer = app_state.get("ai_explainer")
     if not explainer or not explainer.is_available():
         return TrainingExplainResponse(
-            explanation="⚠️ AI analysis unavailable — OPENAI_API_KEY not configured",
+            explanation=f"⚠️ {_unavailable_message(explainer, training=True)}",
             available=False,
         )
 

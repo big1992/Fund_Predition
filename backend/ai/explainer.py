@@ -17,6 +17,7 @@ class AIExplainer:
     def __init__(self):
         self.client = None
         self.model = "gpt-4o-mini"
+        self.unavailable_reason = "not_initialized"
         self._init_client()
 
     def _init_client(self):
@@ -24,16 +25,42 @@ class AIExplainer:
         try:
             from openai import OpenAI
             api_key = os.getenv("OPENAI_API_KEY")
+            if not api_key:
+                # Support keys persisted in app settings (e.g., overrides file)
+                try:
+                    from config.settings import settings
+                    api_key = settings.openai_api_key
+                except Exception:
+                    api_key = None
             if api_key:
+                os.environ["OPENAI_API_KEY"] = api_key
                 self.client = OpenAI(api_key=api_key)
+                self.unavailable_reason = ""
                 logger.info("OpenAI client initialized successfully")
             else:
+                self.unavailable_reason = "missing_api_key"
                 logger.warning("OPENAI_API_KEY not set, AI explanations disabled")
+        except ImportError as e:
+            self.unavailable_reason = "missing_dependency"
+            logger.error("Failed to init OpenAI (dependency missing): %s", e)
         except Exception as e:
+            self.unavailable_reason = "openai_init_failed"
             logger.error("Failed to init OpenAI: %s", e)
 
     def is_available(self) -> bool:
         return self.client is not None
+
+    def get_unavailable_message(self) -> str:
+        """Return a user-facing message describing why AI explainer is unavailable."""
+        if self.is_available():
+            return ""
+        if self.unavailable_reason == "missing_api_key":
+            return "AI explanation unavailable — OPENAI_API_KEY not configured"
+        if self.unavailable_reason == "missing_dependency":
+            return "AI explanation unavailable — backend dependency `openai` is not installed"
+        if self.unavailable_reason == "openai_init_failed":
+            return "AI explanation unavailable — OpenAI client initialization failed"
+        return "AI explanation unavailable — service is not ready"
 
     async def explain_prediction(
         self,

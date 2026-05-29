@@ -1,0 +1,54 @@
+{
+  "lstm": {
+    "sequence_length": 60,
+    "lstm_units_1": 128,
+    "lstm_units_2": 64,
+    "dropout": 0.2,
+    "dense_units": 32,
+    "learning_rate": 0.001,
+    "epochs": 125,
+    "batch_size": 32,
+    "early_stopping_patience": 10,
+    "prediction_days": 5
+  },
+  "xgboost": {
+    "n_estimators": 500,
+    "max_depth": 6,
+    "learning_rate": 0.01,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "reg_alpha": 0.1,
+    "reg_lambda": 1.0,
+    "objective": "reg:squarederror",
+    "eval_metric": "rmse",
+    "prediction_days": 5
+  },
+  "ensemble": {
+    "lstm_weight": 0.3,
+    "xgboost_weight": 0.35,
+    "autogluon_weight": 0.35
+  },
+  "data": {
+    "default_period": "5y",
+    "train_ratio": 0.7,
+    "val_ratio": 0.15,
+    "test_ratio": 0.15,
+    "walk_forward_window": 30,
+    "walk_forward_folds": 5
+  },
+  "backtest": {
+    "initial_capital": 1000000,
+    "buy_threshold": 0.005,
+    "sell_threshold": -0.005,
+    "rsi_overbought": 70,
+    "rsi_oversold": 30,
+    "commission": 0.001
+  },
+  "portfolio": {
+    "min_weight": 0.05,
+    "max_weight": 0.4,
+    "risk_free_rate": 0.02,
+    "num_random_portfolios": 5000
+  },
+  "openai_api_key": ""
+}

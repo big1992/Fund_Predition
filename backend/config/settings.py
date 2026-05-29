@@ -188,6 +188,7 @@ DATA_SETTINGS = {
     "train_ratio": 0.70,
     "val_ratio": 0.15,
     "test_ratio": 0.15,
+    "validation_gap_days": 0,     # embargo gap between train/val/test targets
     "walk_forward_window": 30,    # retrain every 30 days
     "walk_forward_folds": 5,      # number of walk-forward folds
 }

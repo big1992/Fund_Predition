@@ -20,12 +20,20 @@ class _FakeTrainer:
             "model": model_type,
             "current_price": 102.0,
             "predictions": [
-                {"date": f"2026-05-{i+1:02d}", "predicted_price": 100.0 + i, "confidence": 70.0}
+                {
+                    "date": f"2026-05-{i+1:02d}",
+                    "predicted_price": 100.0 + i,
+                    "predicted_low": 99.0 + i,
+                    "predicted_high": 101.0 + i,
+                    "confidence": 70.0,
+                }
                 for i in range(days or 0)
             ],
             "signal": "HOLD",
             "signal_reason": "ok",
             "confidence": 70.0,
+            "model_disagreement_pct": 1.23,
+            "confidence_band": "medium",
         }
 
 
@@ -45,6 +53,12 @@ def test_prediction_days_query_is_forwarded_to_trainer_and_response_length_match
             body = resp.json()
             assert fake_trainer.received_days == 7
             assert len(body["predictions"]) == 7
+            assert body["confidence_band"] == "medium"
+            assert body["model_disagreement_pct"] == 1.23
+            assert all(
+                p["predicted_low"] <= p["predicted_price"] <= p["predicted_high"]
+                for p in body["predictions"]
+            )
         finally:
             app_state["db"] = old_db
             app_state["trainer"] = old_trainer

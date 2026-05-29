@@ -248,6 +248,7 @@ body {
 .metric-card.green::before { background: var(--gradient-green); }
 .metric-card.red::before { background: var(--gradient-red); }
 .metric-card.purple::before { background: linear-gradient(135deg, #8b5cf6, #ec4899); }
+.metric-card.orange::before { background: linear-gradient(135deg, #f59e0b, #ef4444); }
 
 .metric-card:hover {
   transform: translateY(-2px);
