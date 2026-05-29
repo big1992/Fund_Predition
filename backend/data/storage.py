@@ -691,6 +691,81 @@ class DatabaseManager:
         finally:
             conn.close()
 
+    # ========== Alert Events ==========
+
+    def _ensure_alert_events_table(self):
+        conn = self._get_conn()
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS alert_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol TEXT NOT NULL,
+                    alert_type TEXT NOT NULL,
+                    severity TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    payload_json TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_alert_events_symbol_created
+                    ON alert_events(symbol, created_at DESC)
+            """)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def save_alert_event(
+        self,
+        *,
+        symbol: str,
+        alert_type: str,
+        severity: str,
+        message: str,
+        payload: dict,
+    ) -> int:
+        import json
+        self._ensure_alert_events_table()
+        conn = self._get_conn()
+        try:
+            cur = conn.execute(
+                """
+                INSERT INTO alert_events (symbol, alert_type, severity, message, payload_json)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (symbol, alert_type, severity, message, json.dumps(payload, default=str)),
+            )
+            conn.commit()
+            return int(cur.lastrowid)
+        finally:
+            conn.close()
+
+    def get_alert_events(self, symbol: str, limit: int = 20) -> list[dict]:
+        import json
+        self._ensure_alert_events_table()
+        conn = self._get_conn()
+        try:
+            rows = conn.execute(
+                """
+                SELECT * FROM alert_events
+                WHERE symbol = ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+                """,
+                (symbol, limit),
+            ).fetchall()
+            out = []
+            for r in rows:
+                entry = dict(r)
+                try:
+                    entry["payload"] = json.loads(entry.pop("payload_json", "{}"))
+                except Exception:
+                    entry["payload"] = {}
+                out.append(entry)
+            return out
+        finally:
+            conn.close()
+
     # ======================== NEWS SENTIMENT ========================
 
     def _ensure_news_sentiment_table(self):

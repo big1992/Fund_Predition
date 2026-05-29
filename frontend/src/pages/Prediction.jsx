@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import PlotChart from '../components/PlotChart';
 import PredictionResultSection from '../components/PredictionResultSection';
-import { getStocks, getPrediction, trainModels, trainModelsAsync, getIndicators, explainPrediction, explainTraining, getSettings, updateSettings, getBestTrainingRun, getTrainingHistory, getValidationReportCard } from '../api/client';
+import { getStocks, getPrediction, getWatchlistAlerts, trainModels, trainModelsAsync, getIndicators, explainPrediction, explainTraining, getSettings, updateSettings, getBestTrainingRun, getTrainingHistory, getValidationReportCard } from '../api/client';
 import { useTraining } from '../context/TrainingContext';
 
 export default function Prediction() {
@@ -23,6 +23,7 @@ export default function Prediction() {
     const [aiRecommendedParams, setAiRecommendedParams] = useState(null);
     const [applySettingsLoading, setApplySettingsLoading] = useState(false);
     const [validationReport, setValidationReport] = useState(null);
+    const [alerts, setAlerts] = useState([]);
     // Auto-Tune state
     const [autoTuning, setAutoTuning] = useState(false);
     const [autoTuneLogs, setAutoTuneLogs] = useState([]);
@@ -47,6 +48,12 @@ export default function Prediction() {
         try {
             const res = await getPrediction(selected, model);
             setPrediction(res.data);
+            try {
+                const alertsRes = await getWatchlistAlerts(selected, 20);
+                setAlerts(alertsRes.data?.alerts || []);
+            } catch {
+                setAlerts([]);
+            }
             try {
                 const reportRes = await getValidationReportCard(selected);
                 setValidationReport(reportRes.data);
@@ -541,6 +548,33 @@ export default function Prediction() {
                             />
                         </div>
                     )}
+                </div>
+            )}
+
+            {alerts.length > 0 && (
+                <div className="card" style={{ marginBottom: 20, borderLeft: '3px solid var(--accent-yellow)' }}>
+                    <div className="card-header">
+                        <span className="card-title">Watchlist Alerts ({selected})</span>
+                    </div>
+                    <table className="data-table">
+                        <thead>
+                            <tr><th>Severity</th><th>Type</th><th>Message</th><th>Time</th></tr>
+                        </thead>
+                        <tbody>
+                            {alerts.slice(0, 8).map((a) => (
+                                <tr key={a.id || `${a.alert_type}-${a.created_at}`}>
+                                    <td>
+                                        <span className={`signal-badge ${a.severity === 'high' ? 'sell' : a.severity === 'medium' ? 'hold' : 'buy'}`} style={{ fontSize: 10, padding: '2px 8px' }}>
+                                            {String(a.severity || 'low').toUpperCase()}
+                                        </span>
+                                    </td>
+                                    <td>{a.alert_type}</td>
+                                    <td>{a.message}</td>
+                                    <td>{a.created_at ? new Date(a.created_at).toLocaleString('th-TH') : '—'}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
                 </div>
             )}
 

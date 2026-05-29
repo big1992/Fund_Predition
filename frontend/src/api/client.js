@@ -29,6 +29,7 @@ export const getFundNAV = (fundName) => api.get(`/funds/${fundName}/nav`);
 // ===== Prediction APIs =====
 export const getPrediction = (symbol, model = 'ensemble') =>
     api.get(`/predictions/${symbol}`, { params: { model } });
+export const getWatchlistAlerts = (symbol, limit = 20) => api.get(`/predictions/alerts/${symbol}`, { params: { limit } });
 export const trainModels = (symbols = [], model_type = 'all') =>
     api.post('/predictions/train', { symbols, model_type }, { timeout: 600000 });  // 10 min for training
 export const getModelPerformance = () => api.get('/predictions/models/performance');

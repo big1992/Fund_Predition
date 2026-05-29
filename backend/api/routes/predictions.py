@@ -21,6 +21,8 @@ from schemas.api_schemas import (
     ModelRegistryResponse,
     DriftStatusEntry,
     DriftStatusResponse,
+    AlertEntry,
+    AlertResponse,
     ValidationReportCard,
     ValidationReportResponse,
 )
@@ -30,6 +32,7 @@ from data.storage import DatabaseManager
 from services.training_service import refresh_loaded_models, run_training_for_symbols
 from services.validation_report import build_validation_report
 from services.drift_monitor import evaluate_simple_drift
+from services.alert_rules import build_watchlist_alerts
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -302,6 +305,70 @@ async def get_model_drift_status(symbol: str):
     return DriftStatusResponse(
         symbol=symbol,
         entries=[DriftStatusEntry(**e) for e in out],
+    )
+
+
+@router.get("/alerts/{symbol}", response_model=AlertResponse)
+async def get_watchlist_alerts(symbol: str, limit: int = 20):
+    db = app_state["db"]
+    trainer = app_state["trainer"]
+    if not db or not trainer:
+        raise HTTPException(500, "Service not initialized")
+
+    df = db.get_stock_prices(symbol)
+    if df.empty:
+        raise HTTPException(404, f"No price data for {symbol}")
+
+    pred = trainer.predict(df, symbol, model_type="ensemble", days=5)
+    preds = pred.get("predictions", [])
+    current_price = float(pred.get("current_price", 0.0) or 0.0)
+    avg_interval_pct = 0.0
+    if preds and current_price > 0:
+        widths = []
+        for p in preds:
+            lo = p.get("predicted_low")
+            hi = p.get("predicted_high")
+            if isinstance(lo, (int, float)) and isinstance(hi, (int, float)):
+                widths.append((float(hi) - float(lo)) / max(current_price, 1e-9))
+        if widths:
+            avg_interval_pct = float(np.mean(widths))
+
+    drift_entries = db.get_latest_drift_status(symbol)
+    metrics = _symbol_metrics_from_runtime(trainer, symbol) or _symbol_metrics_from_db(symbol)
+    report = build_validation_report(symbol=symbol, metrics_by_name=metrics) if metrics else {"cards": []}
+    cards = report.get("cards", [])
+
+    previous_signal = None
+    prior_alerts = db.get_alert_events(symbol, limit=50)
+    for a in prior_alerts:
+        if a.get("alert_type") == "signal_change":
+            payload = a.get("payload", {})
+            previous_signal = payload.get("current_signal")
+            if previous_signal:
+                break
+
+    alerts = build_watchlist_alerts(
+        symbol=symbol,
+        current_signal=pred.get("signal", "HOLD"),
+        previous_signal=previous_signal,
+        avg_interval_pct=avg_interval_pct,
+        drift_entries=drift_entries,
+        validation_cards=cards,
+    )
+
+    for a in alerts:
+        db.save_alert_event(
+            symbol=symbol,
+            alert_type=a["alert_type"],
+            severity=a["severity"],
+            message=a["message"],
+            payload=a.get("payload", {}),
+        )
+
+    latest = db.get_alert_events(symbol, limit=limit)
+    return AlertResponse(
+        symbol=symbol,
+        alerts=[AlertEntry(**a) for a in latest],
     )
 
 

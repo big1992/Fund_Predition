@@ -324,6 +324,21 @@ class DriftStatusResponse(APIBaseModel):
     entries: list[DriftStatusEntry]
 
 
+class AlertEntry(APIBaseModel):
+    id: Optional[int] = None
+    symbol: str
+    alert_type: str
+    severity: str
+    message: str
+    payload: dict = {}
+    created_at: Optional[str] = None
+
+
+class AlertResponse(APIBaseModel):
+    symbol: str
+    alerts: list[AlertEntry]
+
+
 # ============== System Schemas ==============
 
 class HealthResponse(APIBaseModel):
