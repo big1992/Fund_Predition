@@ -154,3 +154,11 @@ Rollback reference:
 - `docs/compliance-advisory-boundary.md`
 - `docs/foundation-model-benchmark-lab.md`
 - `scripts/benchmark_foundation_models.py`
+
+## Release Hardening
+
+Run secret scanner before every push:
+
+```bash
+python scripts/scan_secrets.py
+```
