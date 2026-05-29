@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import PlotChart from '../components/PlotChart';
-import { getStocks, getModelPerformance, getValidationReportCard, getFeatureImportance, getAutogluonLeaderboard, runBacktest, explainPerformance } from '../api/client';
+import { getStocks, getModelPerformance, getValidationReportCard, getModelRegistry, getFeatureImportance, getAutogluonLeaderboard, runBacktest, explainPerformance } from '../api/client';
 import { getCurrencyInfo } from '../utils/currencyUtils';
 
 export default function ModelPerformance() {
@@ -10,6 +10,7 @@ export default function ModelPerformance() {
     const [features, setFeatures] = useState(null);
     const [agLeaderboard, setAgLeaderboard] = useState(null);
     const [reportCard, setReportCard] = useState(null);
+    const [registry, setRegistry] = useState(null);
     const [backtest, setBacktest] = useState(null);
     const [loading, setLoading] = useState(false);
     const [btLoading, setBtLoading] = useState(false);
@@ -27,6 +28,7 @@ export default function ModelPerformance() {
     useEffect(() => {
         if (!selected) return;
         getValidationReportCard(selected).then(r => setReportCard(r.data)).catch(() => setReportCard(null));
+        getModelRegistry(selected).then(r => setRegistry(r.data)).catch(() => setRegistry(null));
         getFeatureImportance(selected).then(r => setFeatures(r.data)).catch(() => setFeatures(null));
         getAutogluonLeaderboard(selected).then(r => setAgLeaderboard(r.data)).catch(() => setAgLeaderboard(null));
     }, [selected]);
@@ -141,6 +143,40 @@ export default function ModelPerformance() {
                                     </tr>
                                 );
                             })}
+                        </tbody>
+                    </table>
+                )}
+            </div>
+
+            <div className="card" style={{ marginBottom: 20 }}>
+                <div className="card-header">
+                    <span className="card-title">Model Registry ({selected || '—'})</span>
+                </div>
+                {!registry?.entries?.length ? (
+                    <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>
+                        No registry entries yet. Train models first.
+                    </p>
+                ) : (
+                    <table className="data-table">
+                        <thead>
+                            <tr><th>Model</th><th>Version</th><th>Train Window</th><th>MAPE %</th><th>Dir Acc %</th><th>Status</th><th>Artifact</th></tr>
+                        </thead>
+                        <tbody>
+                            {registry.entries.map((e) => (
+                                <tr key={e.id}>
+                                    <td style={{ fontWeight: 600 }}>{e.model_name}</td>
+                                    <td>v{e.version}</td>
+                                    <td>{e.train_start_date && e.train_end_date ? `${String(e.train_start_date).slice(0, 10)} → ${String(e.train_end_date).slice(0, 10)}` : '—'}</td>
+                                    <td>{typeof e.metrics?.mape === 'number' ? e.metrics.mape.toFixed(2) : '—'}</td>
+                                    <td>{typeof e.metrics?.directional_accuracy === 'number' ? e.metrics.directional_accuracy.toFixed(1) : '—'}</td>
+                                    <td>
+                                        {e.is_deployed && <span className="signal-badge hold" style={{ fontSize: 10, padding: '2px 8px', marginRight: 6 }}>DEPLOYED</span>}
+                                        {e.is_best_run && <span className="signal-badge buy" style={{ fontSize: 10, padding: '2px 8px' }}>BEST RUN</span>}
+                                        {!e.is_deployed && !e.is_best_run && <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                                    </td>
+                                    <td style={{ maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.artifact_path || '—'}</td>
+                                </tr>
+                            ))}
                         </tbody>
                     </table>
                 )}

@@ -16,6 +16,8 @@ from schemas.api_schemas import (
     PredictionResponse,
     TrainRequest,
     TrainResponse,
+    ModelRegistryEntry,
+    ModelRegistryResponse,
     ValidationReportCard,
     ValidationReportResponse,
 )
@@ -249,6 +251,16 @@ async def get_best_training_run(symbol: str):
         "best_run": best,
         "message": f"Best run (id={best['id']}): composite_score = {best.get('composite_score', 0):.2f}",
     }
+
+
+@router.get("/models/registry/{symbol}", response_model=ModelRegistryResponse)
+async def get_model_registry(symbol: str, limit: int = 100):
+    db = DatabaseManager(settings.db_path)
+    rows = db.get_model_registry(symbol, limit=limit)
+    return ModelRegistryResponse(
+        symbol=symbol,
+        entries=[ModelRegistryEntry(**r) for r in rows],
+    )
 
 
 @router.post("/train/async")

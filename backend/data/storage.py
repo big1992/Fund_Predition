@@ -464,6 +464,135 @@ class DatabaseManager:
         finally:
             conn.close()
 
+    # ========== Model Registry ==========
+
+    def _ensure_model_registry_table(self):
+        conn = self._get_conn()
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS model_registry (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol TEXT NOT NULL,
+                    model_name TEXT NOT NULL,
+                    version INTEGER NOT NULL,
+                    training_run_id INTEGER,
+                    train_start_date TEXT,
+                    train_end_date TEXT,
+                    feature_version TEXT,
+                    artifact_path TEXT,
+                    params_json TEXT,
+                    metrics_json TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(symbol, model_name, version)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_model_registry_symbol_model
+                    ON model_registry(symbol, model_name)
+            """)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def save_model_registry_entries(
+        self,
+        *,
+        symbol: str,
+        metrics_by_model: dict,
+        params: dict,
+        training_run_id: Optional[int] = None,
+        train_start_date: Optional[str] = None,
+        train_end_date: Optional[str] = None,
+        feature_version: str = "v1",
+        artifact_paths: Optional[dict] = None,
+    ) -> int:
+        import json
+        self._ensure_model_registry_table()
+        artifact_paths = artifact_paths or {}
+        conn = self._get_conn()
+        inserted = 0
+        try:
+            for model_name, model_metrics in metrics_by_model.items():
+                if not isinstance(model_metrics, dict):
+                    continue
+                if model_metrics.get("error"):
+                    continue
+                row = conn.execute(
+                    "SELECT COALESCE(MAX(version), 0) AS v FROM model_registry WHERE symbol = ? AND model_name = ?",
+                    (symbol, model_name),
+                ).fetchone()
+                next_version = int((dict(row).get("v") if row else 0) or 0) + 1
+                conn.execute(
+                    """
+                    INSERT INTO model_registry
+                    (symbol, model_name, version, training_run_id, train_start_date, train_end_date,
+                     feature_version, artifact_path, params_json, metrics_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        symbol,
+                        model_name,
+                        next_version,
+                        training_run_id,
+                        train_start_date,
+                        train_end_date,
+                        feature_version,
+                        artifact_paths.get(model_name),
+                        json.dumps(params, default=str),
+                        json.dumps(model_metrics, default=str),
+                    ),
+                )
+                inserted += 1
+            conn.commit()
+            return inserted
+        finally:
+            conn.close()
+
+    def get_model_registry(self, symbol: str, limit: int = 100) -> list[dict]:
+        import json
+        self._ensure_model_registry_table()
+        self._ensure_training_history_table()
+        best = self.get_best_training_run(symbol)
+        best_run_id = best.get("id") if best else None
+
+        conn = self._get_conn()
+        try:
+            rows = conn.execute(
+                """
+                SELECT mr.*
+                FROM model_registry mr
+                WHERE mr.symbol = ?
+                ORDER BY mr.created_at DESC, mr.id DESC
+                LIMIT ?
+                """,
+                (symbol, limit),
+            ).fetchall()
+
+            latest_by_model = {}
+            for r in rows:
+                entry = dict(r)
+                model_name = entry.get("model_name")
+                if model_name and model_name not in latest_by_model:
+                    latest_by_model[model_name] = entry.get("id")
+
+            out = []
+            for r in rows:
+                entry = dict(r)
+                try:
+                    entry["params"] = json.loads(entry.pop("params_json", "{}"))
+                except Exception:
+                    entry["params"] = {}
+                try:
+                    entry["metrics"] = json.loads(entry.pop("metrics_json", "{}"))
+                except Exception:
+                    entry["metrics"] = {}
+                entry["is_deployed"] = latest_by_model.get(entry.get("model_name")) == entry.get("id")
+                entry["is_best_run"] = best_run_id is not None and entry.get("training_run_id") == best_run_id
+                out.append(entry)
+            return out
+        finally:
+            conn.close()
+
     # ======================== NEWS SENTIMENT ========================
 
     def _ensure_news_sentiment_table(self):

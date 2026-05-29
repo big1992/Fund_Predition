@@ -37,6 +37,21 @@ def _strip_large_training_artifacts(metrics: dict) -> dict:
     return stripped
 
 
+def _artifact_paths_for_symbol(symbol: str) -> dict:
+    safe = symbol.replace(".", "_")
+    model_dir = Path(settings.model_dir)
+    return {
+        "lstm": str(model_dir / f"lstm_{safe}.keras"),
+        "xgboost": str(model_dir / f"xgb_{safe}.joblib"),
+        "autogluon": str(model_dir / f"ag_{safe}"),
+        "ensemble": str(model_dir / f"ensemble_weights_{safe}.joblib"),
+        "naive_last_price": None,
+        "mean_return": None,
+        "buy_and_hold": None,
+        "benchmark_hold": None,
+    }
+
+
 def _current_params() -> dict:
     return {
         "lstm_sequence_length": LSTM_PARAMS.get("sequence_length"),
@@ -133,11 +148,30 @@ def run_training_for_symbols(
             models_trained.extend(trained)
             try:
                 db2 = DatabaseManager(settings.db_path)
-                db2.save_training_run(
+                stripped_metrics = _strip_large_training_artifacts(metrics)
+                params_now = _current_params()
+                run_id = None
+                if len(df.index) > 0:
+                    train_start = str(df.index.min())
+                    train_end = str(df.index.max())
+                else:
+                    train_start = None
+                    train_end = None
+                run_id = db2.save_training_run(
                     symbol=symbol,
                     model_type=model_type,
-                    metrics=_strip_large_training_artifacts(metrics),
-                    params=_current_params(),
+                    metrics=stripped_metrics,
+                    params=params_now,
+                )
+                db2.save_model_registry_entries(
+                    symbol=symbol,
+                    metrics_by_model=stripped_metrics,
+                    params=params_now,
+                    training_run_id=run_id,
+                    train_start_date=train_start,
+                    train_end_date=train_end,
+                    artifact_paths=_artifact_paths_for_symbol(symbol),
+                    feature_version="techind_v1",
                 )
             except Exception:
                 pass

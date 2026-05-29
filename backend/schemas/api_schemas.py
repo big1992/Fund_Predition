@@ -286,6 +286,28 @@ class ValidationReportResponse(APIBaseModel):
     cards: list[ValidationReportCard]
 
 
+class ModelRegistryEntry(APIBaseModel):
+    id: int
+    symbol: str
+    model_name: str
+    version: int
+    training_run_id: Optional[int] = None
+    train_start_date: Optional[str] = None
+    train_end_date: Optional[str] = None
+    feature_version: Optional[str] = None
+    artifact_path: Optional[str] = None
+    created_at: Optional[str] = None
+    is_deployed: bool = False
+    is_best_run: bool = False
+    metrics: dict = {}
+    params: dict = {}
+
+
+class ModelRegistryResponse(APIBaseModel):
+    symbol: str
+    entries: list[ModelRegistryEntry]
+
+
 # ============== System Schemas ==============
 
 class HealthResponse(APIBaseModel):
