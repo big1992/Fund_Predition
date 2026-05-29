@@ -30,6 +30,8 @@ export const getFundNAV = (fundName) => api.get(`/funds/${fundName}/nav`);
 export const getPrediction = (symbol, model = 'ensemble') =>
     api.get(`/predictions/${symbol}`, { params: { model } });
 export const getWatchlistAlerts = (symbol, limit = 20) => api.get(`/predictions/alerts/${symbol}`, { params: { limit } });
+export const exportResearchReportCsv = (symbol) => api.get(`/predictions/reports/${symbol}/csv`, { responseType: 'blob' });
+export const exportResearchReportPdf = (symbol) => api.get(`/predictions/reports/${symbol}/pdf`, { responseType: 'blob' });
 export const trainModels = (symbols = [], model_type = 'all') =>
     api.post('/predictions/train', { symbols, model_type }, { timeout: 600000 });  // 10 min for training
 export const getModelPerformance = () => api.get('/predictions/models/performance');

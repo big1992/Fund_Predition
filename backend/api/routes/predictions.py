@@ -5,7 +5,8 @@ Prediction routes: get predictions, train models, model performance.
 import logging
 import threading
 import numpy as np
-from fastapi import APIRouter, Query, HTTPException
+from datetime import datetime, timezone
+from fastapi import APIRouter, Query, HTTPException, Response
 
 from config.settings import STOCK_UNIVERSE, settings
 from schemas.api_schemas import (
@@ -36,6 +37,50 @@ from services.alert_rules import build_watchlist_alerts
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _mini_pdf_from_lines(lines: list[str]) -> bytes:
+    safe_lines = [ln.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)") for ln in lines]
+    text_stream = "BT /F1 10 Tf 40 800 Td " + " Tj T* ".join(f"({ln})" for ln in safe_lines[:80]) + " Tj ET"
+    objects = []
+    objects.append("1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj")
+    objects.append("2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj")
+    objects.append("3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj")
+    objects.append("4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj")
+    objects.append(f"5 0 obj << /Length {len(text_stream)} >> stream\n{text_stream}\nendstream endobj")
+    body = "%PDF-1.4\n"
+    offsets = []
+    for obj in objects:
+        offsets.append(len(body.encode("latin-1")))
+        body += obj + "\n"
+    xref_start = len(body.encode("latin-1"))
+    body += f"xref\n0 {len(objects)+1}\n0000000000 65535 f \n"
+    for off in offsets:
+        body += f"{off:010d} 00000 n \n"
+    body += f"trailer << /Size {len(objects)+1} /Root 1 0 R >>\nstartxref\n{xref_start}\n%%EOF"
+    return body.encode("latin-1", errors="ignore")
+
+
+def _build_report_payload(symbol: str, trainer, db) -> dict:
+    df = db.get_stock_prices(symbol)
+    if df.empty:
+        raise HTTPException(404, f"No data for {symbol}")
+    pred = trainer.predict(df, symbol, model_type="ensemble", days=5)
+    metrics = _symbol_metrics_from_runtime(trainer, symbol) or _symbol_metrics_from_db(symbol)
+    report = build_validation_report(symbol=symbol, metrics_by_name=metrics) if metrics else {"cards": []}
+    drift = db.get_latest_drift_status(symbol)
+    alerts = db.get_alert_events(symbol, limit=10)
+    return {
+        "symbol": symbol,
+        "generated_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "data_start": str(df.index.min()) if len(df.index) > 0 else None,
+        "data_end": str(df.index.max()) if len(df.index) > 0 else None,
+        "prediction": pred,
+        "validation_cards": report.get("cards", []),
+        "drift_entries": drift,
+        "alerts": alerts,
+        "disclaimer": "Research analytics only. Not personalized investment advice.",
+    }
 
 
 def _metrics_row(model_name: str, symbol: str, metrics: dict) -> ModelMetrics:
@@ -369,6 +414,89 @@ async def get_watchlist_alerts(symbol: str, limit: int = 20):
     return AlertResponse(
         symbol=symbol,
         alerts=[AlertEntry(**a) for a in latest],
+    )
+
+
+@router.get("/reports/{symbol}/csv")
+async def export_research_report_csv(symbol: str):
+    db = app_state["db"]
+    trainer = app_state["trainer"]
+    if not db or not trainer:
+        raise HTTPException(500, "Service not initialized")
+    p = _build_report_payload(symbol, trainer, db)
+    pred = p.get("prediction", {})
+    rows = ["section,key,value"]
+    rows.append(f"meta,symbol,{symbol}")
+    rows.append(f"meta,generated_at_utc,{p.get('generated_at_utc')}")
+    rows.append(f"meta,data_range,{p.get('data_start')} to {p.get('data_end')}")
+    rows.append(f"meta,signal,{pred.get('signal','HOLD')}")
+    rows.append(f"meta,confidence,{pred.get('confidence',0)}")
+    rows.append(f"meta,model_disagreement_pct,{pred.get('model_disagreement_pct')}")
+    for i, pp in enumerate(pred.get("predictions", []), start=1):
+        rows.append(f"forecast,day_{i}_date,{pp.get('date')}")
+        rows.append(f"forecast,day_{i}_base,{pp.get('predicted_price')}")
+        rows.append(f"forecast,day_{i}_low,{pp.get('predicted_low')}")
+        rows.append(f"forecast,day_{i}_high,{pp.get('predicted_high')}")
+        rows.append(f"forecast,day_{i}_confidence,{pp.get('confidence')}")
+    for c in p.get("validation_cards", []):
+        rows.append(f"validation,{c.get('model_name')}_status,{c.get('status')}")
+        rows.append(f"validation,{c.get('model_name')}_mape,{c.get('mape')}")
+        rows.append(f"validation,{c.get('model_name')}_dir_acc,{c.get('directional_accuracy')}")
+    for d in p.get("drift_entries", []):
+        rows.append(f"drift,{d.get('model_name')}_status,{d.get('status')}")
+        rows.append(f"drift,{d.get('model_name')}_score,{d.get('drift_score')}")
+        rows.append(f"drift,{d.get('model_name')}_retrain,{d.get('should_retrain')}")
+    for a in p.get("alerts", []):
+        rows.append(f"alert,{a.get('alert_type')},{str(a.get('message','')).replace(',', ';')}")
+    rows.append(f"compliance,disclaimer,{p.get('disclaimer')}")
+    body = "\n".join(rows)
+    return Response(
+        content=body,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{symbol.replace(".","_")}_research_report.csv"'},
+    )
+
+
+@router.get("/reports/{symbol}/pdf")
+async def export_research_report_pdf(symbol: str):
+    db = app_state["db"]
+    trainer = app_state["trainer"]
+    if not db or not trainer:
+        raise HTTPException(500, "Service not initialized")
+    p = _build_report_payload(symbol, trainer, db)
+    pred = p.get("prediction", {})
+    lines = [
+        f"Fund Prediction Research Report - {symbol}",
+        f"Generated (UTC): {p.get('generated_at_utc')}",
+        f"Data range: {p.get('data_start')} to {p.get('data_end')}",
+        "",
+        f"Signal: {pred.get('signal','HOLD')} | Confidence: {pred.get('confidence',0)} | Band: {pred.get('confidence_band')}",
+        f"Model disagreement: {pred.get('model_disagreement_pct')}",
+        "",
+        "Forecast (downside/base/upside):",
+    ]
+    for pp in pred.get("predictions", [])[:10]:
+        lines.append(f"{pp.get('date')}  {pp.get('predicted_low')} / {pp.get('predicted_price')} / {pp.get('predicted_high')}")
+    lines.append("")
+    lines.append("Validation status:")
+    for c in p.get("validation_cards", [])[:8]:
+        lines.append(f"{c.get('model_name')}: {c.get('status')} | MAPE={c.get('mape')} | DirAcc={c.get('directional_accuracy')}")
+    lines.append("")
+    lines.append("Drift monitor:")
+    for d in p.get("drift_entries", [])[:8]:
+        lines.append(f"{d.get('model_name')}: {d.get('status')} score={d.get('drift_score')} retrain={d.get('should_retrain')}")
+    lines.append("")
+    lines.append("Recent alerts:")
+    for a in p.get("alerts", [])[:8]:
+        lines.append(f"[{a.get('severity')}] {a.get('alert_type')}: {a.get('message')}")
+    lines.append("")
+    lines.append("Backtest summary: Run Model Performance backtest for latest simulation snapshot.")
+    lines.append(f"Disclaimer: {p.get('disclaimer')}")
+    pdf_bytes = _mini_pdf_from_lines(lines)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{symbol.replace(".","_")}_research_report.pdf"'},
     )
 
 

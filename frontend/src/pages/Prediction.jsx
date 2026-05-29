@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import PlotChart from '../components/PlotChart';
 import PredictionResultSection from '../components/PredictionResultSection';
-import { getStocks, getPrediction, getWatchlistAlerts, trainModels, trainModelsAsync, getIndicators, explainPrediction, explainTraining, getSettings, updateSettings, getBestTrainingRun, getTrainingHistory, getValidationReportCard } from '../api/client';
+import { getStocks, getPrediction, getWatchlistAlerts, exportResearchReportCsv, exportResearchReportPdf, trainModels, trainModelsAsync, getIndicators, explainPrediction, explainTraining, getSettings, updateSettings, getBestTrainingRun, getTrainingHistory, getValidationReportCard } from '../api/client';
 import { useTraining } from '../context/TrainingContext';
 
 export default function Prediction() {
@@ -24,6 +24,17 @@ export default function Prediction() {
     const [applySettingsLoading, setApplySettingsLoading] = useState(false);
     const [validationReport, setValidationReport] = useState(null);
     const [alerts, setAlerts] = useState([]);
+
+    const downloadBlob = (blob, filename) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+    };
     // Auto-Tune state
     const [autoTuning, setAutoTuning] = useState(false);
     const [autoTuneLogs, setAutoTuneLogs] = useState([]);
@@ -555,6 +566,20 @@ export default function Prediction() {
                 <div className="card" style={{ marginBottom: 20, borderLeft: '3px solid var(--accent-yellow)' }}>
                     <div className="card-header">
                         <span className="card-title">Watchlist Alerts ({selected})</span>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                            <button className="btn btn-secondary" style={{ fontSize: 11 }} onClick={async () => {
+                                try {
+                                    const res = await exportResearchReportCsv(selected);
+                                    downloadBlob(res.data, `${selected.replace('.', '_')}_research_report.csv`);
+                                } catch { }
+                            }}>Export CSV</button>
+                            <button className="btn btn-secondary" style={{ fontSize: 11 }} onClick={async () => {
+                                try {
+                                    const res = await exportResearchReportPdf(selected);
+                                    downloadBlob(res.data, `${selected.replace('.', '_')}_research_report.pdf`);
+                                } catch { }
+                            }}>Export PDF</button>
+                        </div>
                     </div>
                     <table className="data-table">
                         <thead>

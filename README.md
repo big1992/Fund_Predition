@@ -90,6 +90,8 @@ AutoGluon จะทดลองหลาย model อัตโนมัติ �
 | `POST /api/stocks/collect` | Download data |
 | `GET /api/predictions/{symbol}` | Get prediction |
 | `POST /api/predictions/train` | Train models |
+| `GET /api/predictions/reports/{symbol}/csv` | Export research report CSV |
+| `GET /api/predictions/reports/{symbol}/pdf` | Export research report PDF |
 | `GET /api/predictions/models/autogluon-leaderboard/{symbol}` | AutoGluon leaderboard |
 | `POST /api/portfolio/optimize` | Optimize portfolio |
 | `POST /api/backtest/run` | Run backtest |
@@ -145,3 +147,10 @@ Rollback reference:
 - Any bug, regression, or requested fix must be logged in Linear before or alongside implementation.
 - If work starts immediately, create/update the Linear issue in the same session and link it to the active Sprint.
 - A fix is not considered complete until the related Linear issue is updated with status and validation notes.
+
+## Commercial Readiness Docs
+
+- `docs/commercial-demo-pricing-personas.md`
+- `docs/compliance-advisory-boundary.md`
+- `docs/foundation-model-benchmark-lab.md`
+- `scripts/benchmark_foundation_models.py`
