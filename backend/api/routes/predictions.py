@@ -16,14 +16,54 @@ from schemas.api_schemas import (
     PredictionResponse,
     TrainRequest,
     TrainResponse,
+    ValidationReportCard,
+    ValidationReportResponse,
 )
 from api.main import app_state
 from api.task_manager import task_manager
 from data.storage import DatabaseManager
 from services.training_service import refresh_loaded_models, run_training_for_symbols
+from services.validation_report import build_validation_report
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _metrics_row(model_name: str, symbol: str, metrics: dict) -> ModelMetrics:
+    """Convert stored model/baseline metrics into the API response shape."""
+    return ModelMetrics(
+        model_name=model_name,
+        symbol=symbol,
+        rmse=metrics.get("rmse", 0),
+        mae=metrics.get("mae", 0),
+        mape=metrics.get("mape", 0),
+        directional_accuracy=metrics.get("directional_accuracy", 0),
+        r_squared=metrics.get("r_squared", 0),
+        baseline_type=metrics.get("baseline_type"),
+        total_return=metrics.get("total_return"),
+        max_drawdown=metrics.get("max_drawdown"),
+        description=metrics.get("description"),
+    )
+
+
+def _symbol_metrics_from_runtime(trainer, symbol: str) -> dict[str, dict]:
+    out = {}
+    suffix = f"_{symbol}"
+    for key, val in trainer.get_all_metrics().items():
+        if not isinstance(val, dict) or not key.endswith(suffix):
+            continue
+        name = key[: -len(suffix)]
+        out[name] = val
+    return out
+
+
+def _symbol_metrics_from_db(symbol: str) -> dict[str, dict]:
+    db = DatabaseManager(settings.db_path)
+    history = db.get_training_history(symbol, limit=1)
+    if not history:
+        return {}
+    metrics_detail = history[0].get("metrics_detail", {})
+    return metrics_detail if isinstance(metrics_detail, dict) else {}
 
 
 @router.get("/{symbol}", response_model=PredictionResponse)
@@ -50,6 +90,9 @@ async def get_prediction(
         PredictionPoint(
             date=p["date"],
             predicted_price=p["predicted_price"],
+            predicted_low=p.get("predicted_low"),
+            predicted_high=p.get("predicted_high"),
+            uncertainty_pct=p.get("uncertainty_pct"),
             confidence=p["confidence"],
         )
         for p in result["predictions"]
@@ -62,6 +105,8 @@ async def get_prediction(
         signal=result["signal"],
         signal_reason=result["signal_reason"],
         confidence=result["confidence"],
+        model_disagreement_pct=result.get("model_disagreement_pct"),
+        confidence_band=result.get("confidence_band"),
     )
 
 
@@ -101,20 +146,10 @@ async def get_model_performance():
         for key, metrics in metrics_data.items():
             if "error" in metrics:
                 continue
-            parts = key.split("_", 1)
+            parts = key.rsplit("_", 1)
             model_name = parts[0] if len(parts) > 0 else "unknown"
             symbol = parts[1] if len(parts) > 1 else "unknown"
-            models.append(
-                ModelMetrics(
-                    model_name=model_name,
-                    symbol=symbol,
-                    rmse=metrics.get("rmse", 0),
-                    mae=metrics.get("mae", 0),
-                    mape=metrics.get("mape", 0),
-                    directional_accuracy=metrics.get("directional_accuracy", 0),
-                    r_squared=metrics.get("r_squared", 0),
-                )
-            )
+            models.append(_metrics_row(model_name, symbol, metrics))
     else:
         try:
             db = DatabaseManager(settings.db_path)
@@ -125,20 +160,10 @@ async def get_model_performance():
                 latest = history[0]
                 metrics_detail = latest.get("metrics_detail", {})
 
-                for model_name, row_key in (("lstm", "lstm"), ("xgboost", "xgboost"), ("autogluon", "autogluon")):
-                    m = metrics_detail.get(row_key, {})
-                    if m and "error" not in m and m.get("mape") is not None:
-                        models.append(
-                            ModelMetrics(
-                                model_name=model_name,
-                                symbol=symbol,
-                                rmse=m.get("rmse", 0),
-                                mae=m.get("mae", 0),
-                                mape=m.get("mape", 0),
-                                directional_accuracy=m.get("directional_accuracy", 0),
-                                r_squared=m.get("r_squared", 0),
-                            )
-                        )
+                for model_name, m in metrics_detail.items():
+                    if not isinstance(m, dict) or "error" in m or m.get("mape") is None:
+                        continue
+                    models.append(_metrics_row(model_name, symbol, m))
         except Exception as e:
             logger.warning("Could not load metrics from DB: %s", e)
 
@@ -162,6 +187,26 @@ async def get_feature_importance(symbol: str):
         symbol=symbol,
         model="xgboost",
         features=[FeatureImportance(**f) for f in importances],
+    )
+
+
+@router.get("/models/report-card/{symbol}", response_model=ValidationReportResponse)
+async def get_validation_report_card(symbol: str):
+    trainer = app_state["trainer"]
+    if not trainer:
+        raise HTTPException(500, "Trainer not initialized")
+
+    metrics = _symbol_metrics_from_runtime(trainer, symbol)
+    if not metrics:
+        metrics = _symbol_metrics_from_db(symbol)
+    if not metrics:
+        raise HTTPException(404, f"No training metrics found for {symbol}")
+
+    report = build_validation_report(symbol=symbol, metrics_by_name=metrics)
+    return ValidationReportResponse(
+        symbol=report["symbol"],
+        generated_at_utc=report["generated_at_utc"],
+        cards=[ValidationReportCard(**card) for card in report["cards"]],
     )
 
 
@@ -274,4 +319,3 @@ async def cancel_train_task(task_id: str):
 async def dismiss_task(task_id: str):
     task_manager.dismiss_task(task_id)
     return {"status": "dismissed", "task_id": task_id}
-

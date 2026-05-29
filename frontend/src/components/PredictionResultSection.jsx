@@ -31,6 +31,13 @@ export default function PredictionResultSection({
                 <div className="metric-card purple">
                     <div className="metric-label">Confidence</div>
                     <div className="metric-value">{prediction.confidence?.toFixed(1)}%</div>
+                    <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-muted)', textTransform: 'capitalize' }}>
+                        {prediction.confidence_band || 'n/a'}
+                    </div>
+                </div>
+                <div className="metric-card orange">
+                    <div className="metric-label">Disagreement</div>
+                    <div className="metric-value">{typeof prediction.model_disagreement_pct === 'number' ? `${prediction.model_disagreement_pct.toFixed(2)}%` : 'n/a'}</div>
                 </div>
                 <div className="metric-card red">
                     <div className="metric-label">Model</div>
@@ -73,11 +80,13 @@ export default function PredictionResultSection({
                                     line: { color: '#3b82f6', width: 3, dash: 'dash' }, marker: { size: 8 },
                                 },
                                 {
-                                    x: pred.map(p => p.date), y: pred.map(p => p.predicted_price * 1.02),
+                                    x: pred.map(p => p.date),
+                                    y: pred.map(p => (typeof p.predicted_high === 'number' ? p.predicted_high : p.predicted_price * 1.02)),
                                     type: 'scatter', mode: 'lines', name: 'Upper Band', line: { width: 0 }, showlegend: false,
                                 },
                                 {
-                                    x: pred.map(p => p.date), y: pred.map(p => p.predicted_price * 0.98),
+                                    x: pred.map(p => p.date),
+                                    y: pred.map(p => (typeof p.predicted_low === 'number' ? p.predicted_low : p.predicted_price * 0.98)),
                                     type: 'scatter', mode: 'lines', name: 'Lower Band', line: { width: 0 }, showlegend: false,
                                     fill: 'tonexty', fillcolor: 'rgba(59,130,246,0.1)',
                                 },
@@ -96,12 +105,15 @@ export default function PredictionResultSection({
                 <div className="card">
                     <div className="card-header"><span className="card-title">Forecast Table</span></div>
                     <table className="data-table">
-                        <thead><tr><th>Date</th><th>Predicted Price</th><th>Confidence</th></tr></thead>
+                        <thead><tr><th>Date</th><th>Downside</th><th>Base</th><th>Upside</th><th>Uncertainty</th><th>Confidence</th></tr></thead>
                         <tbody>
                             {pred.map((p, i) => (
                                 <tr key={i}>
                                     <td>{p.date}</td>
+                                    <td>{currencySymbol}{(typeof p.predicted_low === 'number' ? p.predicted_low : p.predicted_price * 0.98).toFixed(2)}</td>
                                     <td style={{ fontWeight: 600 }}>{currencySymbol}{p.predicted_price.toFixed(2)}</td>
+                                    <td>{currencySymbol}{(typeof p.predicted_high === 'number' ? p.predicted_high : p.predicted_price * 1.02).toFixed(2)}</td>
+                                    <td>{typeof p.uncertainty_pct === 'number' ? `${p.uncertainty_pct.toFixed(2)}%` : 'n/a'}</td>
                                     <td>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                             <div style={{ flex: 1, background: 'var(--bg-input)', borderRadius: 4, height: 6, overflow: 'hidden' }}>
@@ -119,4 +131,3 @@ export default function PredictionResultSection({
         </>
     );
 }
-

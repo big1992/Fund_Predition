@@ -74,13 +74,16 @@ def _train_single_symbol(trainer, df, symbol: str, model_type: str, walk_forward
         metrics = trainer.train_all(df, symbol)
         models = [f"lstm_{symbol}", f"xgb_{symbol}", f"ag_{symbol}"]
     elif model_type == "lstm":
-        metrics = {"lstm": trainer.train_lstm(df, symbol)}
+        metrics = trainer.evaluate_baselines(df, symbol)
+        metrics["lstm"] = trainer.train_lstm(df, symbol)
         models = [f"lstm_{symbol}"]
     elif model_type == "xgboost":
-        metrics = {"xgboost": trainer.train_xgboost(df, symbol)}
+        metrics = trainer.evaluate_baselines(df, symbol)
+        metrics["xgboost"] = trainer.train_xgboost(df, symbol)
         models = [f"xgb_{symbol}"]
     elif model_type == "autogluon":
-        metrics = {"autogluon": trainer.train_autogluon(df, symbol)}
+        metrics = trainer.evaluate_baselines(df, symbol)
+        metrics["autogluon"] = trainer.train_autogluon(df, symbol)
         models = [f"ag_{symbol}"]
     else:
         metrics = {}
@@ -147,4 +150,3 @@ def run_training_for_symbols(
         "metrics": all_metrics,
         "message": f"Trained {len(models_trained)} models for {len(all_metrics)} symbols",
     }
-

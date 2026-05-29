@@ -114,6 +114,9 @@ class FundNAVResponse(APIBaseModel):
 class PredictionPoint(APIBaseModel):
     date: date
     predicted_price: float
+    predicted_low: Optional[float] = None
+    predicted_high: Optional[float] = None
+    uncertainty_pct: Optional[float] = None
     confidence: float  # 0-100
 
 
@@ -125,6 +128,8 @@ class PredictionResponse(APIBaseModel):
     signal: Literal["BUY", "SELL", "HOLD"]
     signal_reason: str
     confidence: float
+    model_disagreement_pct: Optional[float] = None
+    confidence_band: Optional[Literal["low", "medium", "high"]] = None
 
 
 class TrainRequest(APIBaseModel):
@@ -240,6 +245,10 @@ class ModelMetrics(APIBaseModel):
     mape: float
     directional_accuracy: float
     r_squared: float
+    baseline_type: Optional[str] = None
+    total_return: Optional[float] = None
+    max_drawdown: Optional[float] = None
+    description: Optional[str] = None
 
 
 class FeatureImportance(APIBaseModel):
@@ -255,6 +264,26 @@ class FeatureImportanceResponse(APIBaseModel):
     symbol: str
     model: str
     features: list[FeatureImportance]
+
+
+class ValidationReportCard(APIBaseModel):
+    model_name: str
+    status: str
+    rmse: Optional[float] = None
+    mae: Optional[float] = None
+    mape: Optional[float] = None
+    directional_accuracy: Optional[float] = None
+    r_squared: Optional[float] = None
+    baseline_name: Optional[str] = None
+    baseline_mape: Optional[float] = None
+    mape_improvement_pct: Optional[float] = None
+    caveats: list[str] = []
+
+
+class ValidationReportResponse(APIBaseModel):
+    symbol: str
+    generated_at_utc: str
+    cards: list[ValidationReportCard]
 
 
 # ============== System Schemas ==============

@@ -147,6 +147,7 @@ class DataPreprocessor:
         self, df: pd.DataFrame,
         train_ratio: float = None,
         val_ratio: float = None,
+        gap_days: int = None,
     ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         """
         Split time-series data chronologically (no shuffling).
@@ -156,18 +157,24 @@ class DataPreprocessor:
             train_ratio = DATA_SETTINGS["train_ratio"]
         if val_ratio is None:
             val_ratio = DATA_SETTINGS["val_ratio"]
+        if gap_days is None:
+            gap_days = int(DATA_SETTINGS.get("validation_gap_days", 0))
+        gap_days = max(0, int(gap_days))
 
         n = len(df)
         train_end = int(n * train_ratio)
-        val_end = int(n * (train_ratio + val_ratio))
+        val_len = int(n * val_ratio)
+        val_start = min(train_end + gap_days, n)
+        val_end = min(val_start + val_len, n)
+        test_start = min(val_end + gap_days, n)
 
         train = df.iloc[:train_end]
-        val = df.iloc[train_end:val_end]
-        test = df.iloc[val_end:]
+        val = df.iloc[val_start:val_end]
+        test = df.iloc[test_start:]
 
         logger.info(
-            "Split: train=%d, val=%d, test=%d (total=%d)",
-            len(train), len(val), len(test), n,
+            "Split: train=%d, gap=%d, val=%d, gap=%d, test=%d (total=%d)",
+            len(train), gap_days, len(val), gap_days, len(test), n,
         )
         return train, val, test
 
@@ -204,14 +211,16 @@ class DataPreprocessor:
         if not feature_cols:
             feature_cols = [target_col]
 
-        # Split FIRST to prevent data leakage
+        # Split boundaries FIRST to prevent data leakage
         n = len(df_feat)
         train_end = int(n * DATA_SETTINGS["train_ratio"])
-        val_end = int(n * (DATA_SETTINGS["train_ratio"] + DATA_SETTINGS["val_ratio"]))
+        val_len = int(n * DATA_SETTINGS["val_ratio"])
+        gap_days = max(0, int(DATA_SETTINGS.get("validation_gap_days", 0)))
+        val_start = min(train_end + gap_days, n)
+        val_end = min(val_start + val_len, n)
+        test_start = min(val_end + gap_days, n)
 
         train_df = df_feat.iloc[:train_end]
-        val_df = df_feat.iloc[:val_end]      # includes train for seq building
-        test_df = df_feat                     # includes all for seq building
 
         # Fit feature scaler ONLY on training data (data leakage fix)
         from sklearn.preprocessing import MinMaxScaler
@@ -223,37 +232,30 @@ class DataPreprocessor:
         train_prices = train_df[target_col].values.reshape(-1, 1)
         self.price_scaler.fit(train_prices)
 
-        # Transform all splits using train-fitted scalers
-        train_features = self.lstm_feature_scaler.transform(train_df[feature_cols].values)
-        val_features = self.lstm_feature_scaler.transform(val_df[feature_cols].values)
-        test_features = self.lstm_feature_scaler.transform(test_df[feature_cols].values)
-
-        train_target = self.price_scaler.transform(
-            train_df[target_col].values.reshape(-1, 1)
-        ).flatten()
-        val_target = self.price_scaler.transform(
-            val_df[target_col].values.reshape(-1, 1)
-        ).flatten()
-        test_target = self.price_scaler.transform(
-            test_df[target_col].values.reshape(-1, 1)
+        # Transform full frame using train-fitted scalers.
+        # We then split by target index so sequence windows can be built safely.
+        all_features = self.lstm_feature_scaler.transform(df_feat[feature_cols].values)
+        all_target = self.price_scaler.transform(
+            df_feat[target_col].values.reshape(-1, 1)
         ).flatten()
 
         seq_len = LSTM_PARAMS["sequence_length"]
 
-        # Create multi-feature sequences
-        X_train, y_train = self.create_feature_sequences(train_features, train_target, seq_len)
-        X_val, y_val = self.create_feature_sequences(val_features, val_target, seq_len)
-        X_test, y_test = self.create_feature_sequences(test_features, test_target, seq_len)
+        # Build all sequences, then assign each sample by its target row index.
+        X_all, y_all = self.create_feature_sequences(all_features, all_target, seq_len)
+        target_indices = np.arange(seq_len, n)
 
-        # Filter val/test to only new data points
-        X_val = X_val[len(X_train):]
-        y_val = y_val[len(y_train):]
-        X_test = X_test[len(X_train) + len(X_val):]
-        y_test = y_test[len(y_train) + len(y_val):]
+        train_mask = target_indices < train_end
+        val_mask = (target_indices >= val_start) & (target_indices < val_end)
+        test_mask = target_indices >= test_start
+
+        X_train, y_train = X_all[train_mask], y_all[train_mask]
+        X_val, y_val = X_all[val_mask], y_all[val_mask]
+        X_test, y_test = X_all[test_mask], y_all[test_mask]
 
         logger.info(
-            "LSTM data: X_train=%s, X_val=%s, X_test=%s, features=%d",
-            X_train.shape, X_val.shape, X_test.shape, len(feature_cols),
+            "LSTM data: X_train=%s, gap=%d, X_val=%s, gap=%d, X_test=%s, features=%d",
+            X_train.shape, gap_days, X_val.shape, gap_days, X_test.shape, len(feature_cols),
         )
 
         return {
@@ -263,6 +265,15 @@ class DataPreprocessor:
             "dates": df_feat.index.tolist(),
             "original_prices": df_feat[target_col].values,
             "feature_cols": feature_cols,
+            "split_meta": {
+                "n_rows": int(n),
+                "train_end": int(train_end),
+                "val_start": int(val_start),
+                "val_end": int(val_end),
+                "test_start": int(test_start),
+                "gap_days": int(gap_days),
+                "seq_len": int(seq_len),
+            },
         }
 
     def prepare_xgboost_data(
@@ -310,4 +321,11 @@ class DataPreprocessor:
             "dates": df.index.tolist(),
             # Base prices for converting returns back to prices (for metrics)
             "close_test": test["close"].values if "close" in test.columns else None,
+            "split_meta": {
+                "n_rows": int(len(df)),
+                "train_rows": int(len(train)),
+                "val_rows": int(len(val)),
+                "test_rows": int(len(test)),
+                "gap_days": int(DATA_SETTINGS.get("validation_gap_days", 0)),
+            },
         }

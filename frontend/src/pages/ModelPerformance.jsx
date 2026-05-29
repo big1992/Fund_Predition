@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import PlotChart from '../components/PlotChart';
-import { getStocks, getModelPerformance, getFeatureImportance, getAutogluonLeaderboard, runBacktest, explainPerformance } from '../api/client';
+import { getStocks, getModelPerformance, getValidationReportCard, getFeatureImportance, getAutogluonLeaderboard, runBacktest, explainPerformance } from '../api/client';
 import { getCurrencyInfo } from '../utils/currencyUtils';
 
 export default function ModelPerformance() {
@@ -9,6 +9,7 @@ export default function ModelPerformance() {
     const [performance, setPerformance] = useState(null);
     const [features, setFeatures] = useState(null);
     const [agLeaderboard, setAgLeaderboard] = useState(null);
+    const [reportCard, setReportCard] = useState(null);
     const [backtest, setBacktest] = useState(null);
     const [loading, setLoading] = useState(false);
     const [btLoading, setBtLoading] = useState(false);
@@ -25,6 +26,7 @@ export default function ModelPerformance() {
 
     useEffect(() => {
         if (!selected) return;
+        getValidationReportCard(selected).then(r => setReportCard(r.data)).catch(() => setReportCard(null));
         getFeatureImportance(selected).then(r => setFeatures(r.data)).catch(() => setFeatures(null));
         getAutogluonLeaderboard(selected).then(r => setAgLeaderboard(r.data)).catch(() => setAgLeaderboard(null));
     }, [selected]);
@@ -96,6 +98,49 @@ export default function ModelPerformance() {
                                     <td>{m.r_squared.toFixed(4)}</td>
                                 </tr>
                             ))}
+                        </tbody>
+                    </table>
+                )}
+            </div>
+
+            {/* Validation Report Card */}
+            <div className="card" style={{ marginBottom: 20 }}>
+                <div className="card-header">
+                    <span className="card-title">Validation Report Card ({selected || '—'})</span>
+                </div>
+                {!reportCard?.cards?.length ? (
+                    <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>
+                        No report card yet. Train models first.
+                    </p>
+                ) : (
+                    <table className="data-table">
+                        <thead>
+                            <tr><th>Model</th><th>Status</th><th>MAPE %</th><th>Dir Acc %</th><th>Baseline Delta</th><th>Caveats</th></tr>
+                        </thead>
+                        <tbody>
+                            {reportCard.cards.map((c, i) => {
+                                const statusColor =
+                                    c.status === 'pass' ? 'var(--accent-green)' :
+                                        c.status === 'warn' ? 'var(--accent-yellow)' :
+                                            c.status === 'reference' ? 'var(--accent-cyan)' :
+                                                'var(--accent-red)';
+                                return (
+                                    <tr key={i}>
+                                        <td style={{ fontWeight: 600 }}>{c.model_name}</td>
+                                        <td><span className="signal-badge hold" style={{ fontSize: 11, padding: '3px 10px', color: statusColor }}>{c.status.toUpperCase()}</span></td>
+                                        <td>{typeof c.mape === 'number' ? c.mape.toFixed(2) : '—'}</td>
+                                        <td>{typeof c.directional_accuracy === 'number' ? c.directional_accuracy.toFixed(1) : '—'}</td>
+                                        <td>
+                                            {typeof c.mape_improvement_pct === 'number'
+                                                ? `${c.mape_improvement_pct > 0 ? '+' : ''}${c.mape_improvement_pct.toFixed(2)}%`
+                                                : '—'}
+                                        </td>
+                                        <td style={{ maxWidth: 360 }}>
+                                            {Array.isArray(c.caveats) && c.caveats.length > 0 ? c.caveats.join(' | ') : '—'}
+                                        </td>
+                                    </tr>
+                                );
+                            })}
                         </tbody>
                     </table>
                 )}
