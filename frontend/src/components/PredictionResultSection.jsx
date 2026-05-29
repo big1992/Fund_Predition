@@ -5,6 +5,7 @@ export default function PredictionResultSection({
     prediction,
     stocks,
     selected,
+    validationReport,
     aiLoading,
     aiExplanation,
     onRefreshAi,
@@ -12,6 +13,17 @@ export default function PredictionResultSection({
     const pred = prediction?.predictions || [];
     const signal = prediction?.signal || 'HOLD';
     const { symbol: currencySymbol, label: currencyLabel } = getCurrencyInfo(stocks, selected);
+    const cards = validationReport?.cards || [];
+    const ensembleCard = cards.find(c => c.model_name === 'ensemble');
+    const trustStatus = ensembleCard?.status || 'reference';
+    const trustColor = trustStatus === 'pass'
+        ? 'var(--accent-green)'
+        : trustStatus === 'warn'
+            ? 'var(--accent-yellow)'
+            : trustStatus === 'fail'
+                ? 'var(--accent-red)'
+                : 'var(--accent-cyan)';
+    const topCaveats = cards.flatMap(c => c.caveats || []).filter(Boolean).slice(0, 3);
 
     return (
         <>
@@ -66,6 +78,30 @@ export default function PredictionResultSection({
                 ) : (
                     <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Run prediction to generate AI analysis.</p>
                 )}
+            </div>
+
+            <div className="grid-2" style={{ marginBottom: 20 }}>
+                <div className="card" style={{ borderLeft: `3px solid ${trustColor}` }}>
+                    <div className="card-header"><span className="card-title">Model Trust Snapshot</span></div>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 8 }}>
+                        Validation status: <span style={{ color: trustColor, fontWeight: 700, textTransform: 'uppercase' }}>{trustStatus}</span>
+                    </p>
+                    <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>
+                        {ensembleCard?.summary || 'No ensemble validation summary available for this symbol yet.'}
+                    </p>
+                </div>
+                <div className="card" style={{ borderLeft: '3px solid var(--accent-yellow)' }}>
+                    <div className="card-header"><span className="card-title">Risk Caveats</span></div>
+                    {topCaveats.length > 0 ? (
+                        <ul style={{ margin: 0, paddingLeft: 18, color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.8 }}>
+                            {topCaveats.map((item, i) => <li key={i}>{item}</li>)}
+                        </ul>
+                    ) : (
+                        <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>
+                            Caveat details are not available yet. Run/retrain models to populate reliability notes.
+                        </p>
+                    )}
+                </div>
             </div>
 
             <div className="grid-2">
@@ -127,6 +163,13 @@ export default function PredictionResultSection({
                         </tbody>
                     </table>
                 </div>
+            </div>
+
+            <div className="card" style={{ marginTop: 20, border: '1px dashed rgba(245, 158, 11, 0.5)', background: 'rgba(245, 158, 11, 0.05)' }}>
+                <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.7 }}>
+                    This output is research analytics, not investment advice. Use downside/base/upside range, disagreement, and confidence
+                    together with your own risk limits before making any trade decision.
+                </p>
             </div>
         </>
     );

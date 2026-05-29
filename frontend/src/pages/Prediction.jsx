@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import PlotChart from '../components/PlotChart';
 import PredictionResultSection from '../components/PredictionResultSection';
-import { getStocks, getPrediction, trainModels, trainModelsAsync, getIndicators, explainPrediction, explainTraining, getSettings, updateSettings, getBestTrainingRun, getTrainingHistory } from '../api/client';
+import { getStocks, getPrediction, trainModels, trainModelsAsync, getIndicators, explainPrediction, explainTraining, getSettings, updateSettings, getBestTrainingRun, getTrainingHistory, getValidationReportCard } from '../api/client';
 import { useTraining } from '../context/TrainingContext';
 
 export default function Prediction() {
@@ -22,6 +22,7 @@ export default function Prediction() {
     const [trainAiLoading, setTrainAiLoading] = useState(false);
     const [aiRecommendedParams, setAiRecommendedParams] = useState(null);
     const [applySettingsLoading, setApplySettingsLoading] = useState(false);
+    const [validationReport, setValidationReport] = useState(null);
     // Auto-Tune state
     const [autoTuning, setAutoTuning] = useState(false);
     const [autoTuneLogs, setAutoTuneLogs] = useState([]);
@@ -42,9 +43,16 @@ export default function Prediction() {
         if (!selected) return;
         setLoading(true);
         setAiExplanation('');
+        setValidationReport(null);
         try {
             const res = await getPrediction(selected, model);
             setPrediction(res.data);
+            try {
+                const reportRes = await getValidationReportCard(selected);
+                setValidationReport(reportRes.data);
+            } catch {
+                setValidationReport(null);
+            }
             if (res.data?.predictions?.length > 0) fetchAIExplanation(res.data);
         } catch (err) {
             setPrediction(null);
@@ -706,6 +714,7 @@ export default function Prediction() {
                     prediction={prediction}
                     stocks={stocks}
                     selected={selected}
+                    validationReport={validationReport}
                     aiLoading={aiLoading}
                     aiExplanation={aiExplanation}
                     onRefreshAi={() => fetchAIExplanation(prediction)}
