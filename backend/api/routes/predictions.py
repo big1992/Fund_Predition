@@ -4,6 +4,7 @@ Prediction routes: get predictions, train models, model performance.
 
 import logging
 import threading
+import numpy as np
 from fastapi import APIRouter, Query, HTTPException
 
 from config.settings import STOCK_UNIVERSE, settings
@@ -18,6 +19,8 @@ from schemas.api_schemas import (
     TrainResponse,
     ModelRegistryEntry,
     ModelRegistryResponse,
+    DriftStatusEntry,
+    DriftStatusResponse,
     ValidationReportCard,
     ValidationReportResponse,
 )
@@ -26,6 +29,7 @@ from api.task_manager import task_manager
 from data.storage import DatabaseManager
 from services.training_service import refresh_loaded_models, run_training_for_symbols
 from services.validation_report import build_validation_report
+from services.drift_monitor import evaluate_simple_drift
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -260,6 +264,44 @@ async def get_model_registry(symbol: str, limit: int = 100):
     return ModelRegistryResponse(
         symbol=symbol,
         entries=[ModelRegistryEntry(**r) for r in rows],
+    )
+
+
+@router.get("/models/drift/{symbol}", response_model=DriftStatusResponse)
+async def get_model_drift_status(symbol: str):
+    db = DatabaseManager(settings.db_path)
+    history = db.get_training_history(symbol, limit=1)
+    if not history:
+        raise HTTPException(404, f"No training history found for {symbol}")
+
+    latest = history[0]
+    metrics_detail = latest.get("metrics_detail", {}) if isinstance(latest, dict) else {}
+
+    df = db.get_stock_prices(symbol)
+    if df.empty or "close" not in df.columns:
+        raise HTTPException(404, f"No price data for {symbol}")
+    returns = df["close"].pct_change().dropna().tail(30).values.astype(float)
+
+    out = []
+    for model_name, m in metrics_detail.items():
+        if not isinstance(m, dict) or m.get("error"):
+            continue
+        train_mape = m.get("mape")
+        drift = evaluate_simple_drift(train_mape=train_mape, latest_returns=np.asarray(returns))
+        db.save_drift_status(
+            symbol=symbol,
+            model_name=model_name,
+            status=drift["status"],
+            drift_score=drift["drift_score"],
+            should_retrain=drift["should_retrain"],
+            reasons=drift["reasons"],
+            metrics=drift["metrics"],
+        )
+
+    out = db.get_latest_drift_status(symbol)
+    return DriftStatusResponse(
+        symbol=symbol,
+        entries=[DriftStatusEntry(**e) for e in out],
     )
 
 

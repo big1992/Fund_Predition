@@ -593,6 +593,104 @@ class DatabaseManager:
         finally:
             conn.close()
 
+    # ========== Drift Status ==========
+
+    def _ensure_drift_status_table(self):
+        conn = self._get_conn()
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS drift_status (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol TEXT NOT NULL,
+                    model_name TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    drift_score REAL,
+                    should_retrain INTEGER DEFAULT 0,
+                    reasons_json TEXT,
+                    metrics_json TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_drift_status_symbol_model
+                    ON drift_status(symbol, model_name, created_at DESC)
+            """)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def save_drift_status(
+        self,
+        *,
+        symbol: str,
+        model_name: str,
+        status: str,
+        drift_score: float,
+        should_retrain: bool,
+        reasons: list[str],
+        metrics: dict,
+    ) -> int:
+        import json
+        self._ensure_drift_status_table()
+        conn = self._get_conn()
+        try:
+            cur = conn.execute(
+                """
+                INSERT INTO drift_status
+                (symbol, model_name, status, drift_score, should_retrain, reasons_json, metrics_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    symbol,
+                    model_name,
+                    status,
+                    float(drift_score),
+                    1 if should_retrain else 0,
+                    json.dumps(reasons, default=str),
+                    json.dumps(metrics, default=str),
+                ),
+            )
+            conn.commit()
+            return int(cur.lastrowid)
+        finally:
+            conn.close()
+
+    def get_latest_drift_status(self, symbol: str) -> list[dict]:
+        import json
+        self._ensure_drift_status_table()
+        conn = self._get_conn()
+        try:
+            rows = conn.execute(
+                """
+                SELECT d1.*
+                FROM drift_status d1
+                INNER JOIN (
+                    SELECT symbol, model_name, MAX(id) AS max_id
+                    FROM drift_status
+                    WHERE symbol = ?
+                    GROUP BY symbol, model_name
+                ) d2 ON d1.id = d2.max_id
+                ORDER BY d1.model_name
+                """,
+                (symbol,),
+            ).fetchall()
+            out = []
+            for r in rows:
+                entry = dict(r)
+                entry["should_retrain"] = bool(entry.get("should_retrain"))
+                try:
+                    entry["reasons"] = json.loads(entry.pop("reasons_json", "[]"))
+                except Exception:
+                    entry["reasons"] = []
+                try:
+                    entry["metrics"] = json.loads(entry.pop("metrics_json", "{}"))
+                except Exception:
+                    entry["metrics"] = {}
+                out.append(entry)
+            return out
+        finally:
+            conn.close()
+
     # ======================== NEWS SENTIMENT ========================
 
     def _ensure_news_sentiment_table(self):

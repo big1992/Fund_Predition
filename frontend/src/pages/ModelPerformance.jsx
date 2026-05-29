@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import PlotChart from '../components/PlotChart';
-import { getStocks, getModelPerformance, getValidationReportCard, getModelRegistry, getFeatureImportance, getAutogluonLeaderboard, runBacktest, explainPerformance } from '../api/client';
+import { getStocks, getModelPerformance, getValidationReportCard, getModelRegistry, getModelDrift, getFeatureImportance, getAutogluonLeaderboard, runBacktest, explainPerformance } from '../api/client';
 import { getCurrencyInfo } from '../utils/currencyUtils';
 
 export default function ModelPerformance() {
@@ -11,6 +11,7 @@ export default function ModelPerformance() {
     const [agLeaderboard, setAgLeaderboard] = useState(null);
     const [reportCard, setReportCard] = useState(null);
     const [registry, setRegistry] = useState(null);
+    const [drift, setDrift] = useState(null);
     const [backtest, setBacktest] = useState(null);
     const [loading, setLoading] = useState(false);
     const [btLoading, setBtLoading] = useState(false);
@@ -29,6 +30,7 @@ export default function ModelPerformance() {
         if (!selected) return;
         getValidationReportCard(selected).then(r => setReportCard(r.data)).catch(() => setReportCard(null));
         getModelRegistry(selected).then(r => setRegistry(r.data)).catch(() => setRegistry(null));
+        getModelDrift(selected).then(r => setDrift(r.data)).catch(() => setDrift(null));
         getFeatureImportance(selected).then(r => setFeatures(r.data)).catch(() => setFeatures(null));
         getAutogluonLeaderboard(selected).then(r => setAgLeaderboard(r.data)).catch(() => setAgLeaderboard(null));
     }, [selected]);
@@ -175,6 +177,40 @@ export default function ModelPerformance() {
                                         {!e.is_deployed && !e.is_best_run && <span style={{ color: 'var(--text-muted)' }}>—</span>}
                                     </td>
                                     <td style={{ maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.artifact_path || '—'}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                )}
+            </div>
+
+            <div className="card" style={{ marginBottom: 20 }}>
+                <div className="card-header">
+                    <span className="card-title">Drift Monitor ({selected || '—'})</span>
+                </div>
+                {!drift?.entries?.length ? (
+                    <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>
+                        No drift status yet.
+                    </p>
+                ) : (
+                    <table className="data-table">
+                        <thead>
+                            <tr><th>Model</th><th>Status</th><th>Drift Score</th><th>Retrain</th><th>Reasons</th></tr>
+                        </thead>
+                        <tbody>
+                            {drift.entries.map((e, idx) => (
+                                <tr key={idx}>
+                                    <td style={{ fontWeight: 600 }}>{e.model_name}</td>
+                                    <td>
+                                        <span className={`signal-badge ${e.status === 'drifted' ? 'sell' : e.status === 'warn' ? 'hold' : 'buy'}`} style={{ fontSize: 10, padding: '2px 8px' }}>
+                                            {String(e.status).toUpperCase()}
+                                        </span>
+                                    </td>
+                                    <td>{(e.drift_score ?? 0).toFixed(3)}</td>
+                                    <td style={{ color: e.should_retrain ? 'var(--accent-red)' : 'var(--accent-green)', fontWeight: 700 }}>
+                                        {e.should_retrain ? 'YES' : 'NO'}
+                                    </td>
+                                    <td style={{ maxWidth: 420 }}>{Array.isArray(e.reasons) ? e.reasons.join(' | ') : '—'}</td>
                                 </tr>
                             ))}
                         </tbody>

@@ -34,6 +34,7 @@ export const trainModels = (symbols = [], model_type = 'all') =>
 export const getModelPerformance = () => api.get('/predictions/models/performance');
 export const getValidationReportCard = (symbol) => api.get(`/predictions/models/report-card/${symbol}`);
 export const getModelRegistry = (symbol, limit = 100) => api.get(`/predictions/models/registry/${symbol}`, { params: { limit } });
+export const getModelDrift = (symbol) => api.get(`/predictions/models/drift/${symbol}`);
 export const getFeatureImportance = (symbol) => api.get(`/predictions/models/features/${symbol}`);
 export const getBestTrainingRun = (symbol) => api.get(`/predictions/models/best-run/${symbol}`);
 export const getTrainingHistory = (symbol, limit = 10) => api.get(`/predictions/models/history/${symbol}`, { params: { limit } });

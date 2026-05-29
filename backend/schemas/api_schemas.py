@@ -308,6 +308,22 @@ class ModelRegistryResponse(APIBaseModel):
     entries: list[ModelRegistryEntry]
 
 
+class DriftStatusEntry(APIBaseModel):
+    symbol: str
+    model_name: str
+    status: str
+    drift_score: float
+    should_retrain: bool
+    reasons: list[str] = []
+    metrics: dict = {}
+    created_at: Optional[str] = None
+
+
+class DriftStatusResponse(APIBaseModel):
+    symbol: str
+    entries: list[DriftStatusEntry]
+
+
 # ============== System Schemas ==============
 
 class HealthResponse(APIBaseModel):
