@@ -23,7 +23,11 @@ export default function PredictionResultSection({
             : trustStatus === 'fail'
                 ? 'var(--accent-red)'
                 : 'var(--accent-cyan)';
-    const topCaveats = cards.flatMap(c => c.caveats || []).filter(Boolean).slice(0, 3);
+    // Build labeled caveats from each card (prefix with model name), then deduplicate
+    const labeledCaveats = cards
+        .filter(c => c.model_name !== 'naive' && c.model_name !== 'mean_return' && c.model_name !== 'buy_hold' && c.model_name !== 'benchmark')
+        .flatMap(c => (c.caveats || []).filter(Boolean).map(cav => `[${c.model_name?.toUpperCase()}] ${cav}`));
+    const topCaveats = [...new Set(labeledCaveats)].slice(0, 5);
 
     return (
         <>
@@ -96,9 +100,13 @@ export default function PredictionResultSection({
                         <ul style={{ margin: 0, paddingLeft: 18, color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.8 }}>
                             {topCaveats.map((item, i) => <li key={i}>{item}</li>)}
                         </ul>
+                    ) : cards.length > 0 ? (
+                        <p style={{ color: 'var(--accent-green)', fontSize: 13 }}>
+                            ✅ ทุกโมเดลผ่านมาตรฐาน — ไม่มีข้อเตือนเพิ่มเติม
+                        </p>
                     ) : (
                         <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>
-                            Caveat details are not available yet. Run/retrain models to populate reliability notes.
+                            ยังไม่มีข้อมูล Validation — กรุณา Train Models ก่อนเพื่อดู Risk Caveats
                         </p>
                     )}
                 </div>

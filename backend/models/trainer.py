@@ -654,14 +654,16 @@ class ModelTrainer:
                 else:
                     result["confidence_band"] = "low"
 
-            # Format predictions
+            # Format predictions — advance business-day by business-day to avoid duplicate dates
             last_date = df.index[-1] if hasattr(df.index[-1], 'strftime') else pd.Timestamp.now()
+            from datetime import timedelta
+            current_date = last_date
             for i, pred in enumerate(final_preds):
-                from datetime import timedelta
-                target_date = last_date + timedelta(days=i + 1)
-                # Skip weekends
-                while target_date.weekday() >= 5:
-                    target_date += timedelta(days=1)
+                # Move to next business day (skip Sat/Sun)
+                current_date = current_date + timedelta(days=1)
+                while current_date.weekday() >= 5:   # 5=Sat, 6=Sun
+                    current_date += timedelta(days=1)
+                target_date = current_date
 
                 # Per-day confidence decreases slightly for farther predictions
                 day_confidence = round(result["confidence"] * (1 - i * 0.03), 1)
